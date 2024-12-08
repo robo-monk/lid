@@ -1,0 +1,7 @@
+pocketbase:
+    cd ../../convex/convex/pocketbase
+    dotenv -- ./convex-pb serve
+erroring:
+    echo 'bing bong'
+    sleep 4
+    exit 1
