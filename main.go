@@ -4,7 +4,6 @@ import (
 	"log"
 	"os"
 	"os/exec"
-	"strings"
 	"time"
 )
 
@@ -27,13 +26,14 @@ func New() *Lid {
 	}
 
 	return &Lid {
-		logger: log.New(logFile, "LOG: ", log.Ldate|log.Ltime|log.Lshortfile),
+		logger: log.New(logFile, "", log.Ldate|log.Ltime),
 		services: make(map[string]*Service),
 	}
 }
 
 func (lid *Lid) Register(serviceName string, s *Service) {
 	s.name = serviceName;
+	s.lid = lid
 	lid.services[serviceName] = s
 }
 
@@ -46,7 +46,6 @@ func (lid *Lid) Fork(args ...string) {
 	// fork
 	cmd.Start()
 	cmd.Process.Release()
-
 }
 
 
@@ -60,15 +59,17 @@ func (lid *Lid) Start() {
 		}
 
 		log.Printf("Starting '%s' \n", service.name)
-		lid.Fork("--start-process", service.name)
+		lid.Fork("--start-service", service.name)
 	}
 
 }
 
 func (lid *Lid) Stop() {
 	for _, service := range lid.services {
-		service.Stop()
-		lid.logger.Printf("Stop %s\n", service.name)
+		err := service.Stop()
+		if err == nil {
+			lid.logger.Printf("Stop %s\n", service.name)
+		}
 	}
 }
 
@@ -102,23 +103,14 @@ func main() {
 		cwd: "../../convex/convex/pocketbase",
 		command: []string { "./convex-pb", "serve"},
 		envFile: ".env",
-		onExit: func (ok bool, e *exec.ExitError) {
-			if ok {
-				lid.logger.Printf(" -- Pocketbase grafully shut down\n")
-			} else {
-				lid.logger.Printf(" -- Pocketbase Exited with %d; %v\n", e.ExitCode(), ok)
-			}
-		},
 	});
 
 
 	lid.Register("test", &Service {
-		command: []string { "bash", "-c", "sleep 5;exit 0" },
-		onExit: func (ok bool, e *exec.ExitError) {
-			if ok {
-				lid.logger.Printf(" -- error code ok %v\n", ok)
-			} else {
-				lid.logger.Printf(" -- Sleep Exited with %d; %v\n", e.ExitCode(), ok)
+		command: []string { "bash", "-c", "sleep 5; exit 1" },
+		onExit: func (e *exec.ExitError, restart func()) {
+			if e != nil && e.ExitCode() != -1 {
+				restart()
 			}
 		},
 	});
@@ -135,13 +127,10 @@ func main() {
 		fallthrough
 	case "list":
 		lid.List()
-	case "--start-process":
+	case "--start-service":
 		serviceName := os.Args[2]
 		lid.services[serviceName].Start()
-	case "--event":
-		lid.logger.Printf("EVENT: %s\n", strings.Join(os.Args, ", "))
 	default:
 		panic(invalidUsage)
 	}
-
 }

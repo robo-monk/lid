@@ -13,19 +13,14 @@ import (
 	"github.com/shirou/gopsutil/v4/process"
 )
 
-type ExitEvent struct {
-	code int
-}
-
 type Service struct {
-
+	lid		*Lid
 	name 	string
 	cwd		string
+
 	command []string
-
 	envFile	string
-
-	onExit 	func(ok bool, e *exec.ExitError)
+	onExit 	func(e *exec.ExitError, restart func())
 }
 
 func readDotEnvFile(filename string) []string {
@@ -92,7 +87,6 @@ func (s *Service) getProcess() (*process.Process, error) {
 func (s *Service) Start() {
 
 	fmt.Printf("Starting service %s\n", s.name);
-	fmt.Println("Starting command..")
 
 	cmd := exec.Command(s.command[0], s.command[1:]...)
 
@@ -110,29 +104,30 @@ func (s *Service) Start() {
 	// Start the command in the background
 	err := cmd.Start()
 	if err != nil {
-		log.Fatalf("Failed to start command: %v", err)
+		s.lid.logger.Fatalf("Failed to start command: %v", err)
 	}
 
 	// Get the PID of the background process
-	log.Printf("Started process with PID: %d", cmd.Process.Pid)
+	s.lid.logger.Printf("Started '%s' with PID: %d", s.name, cmd.Process.Pid)
 	pid := cmd.Process.Pid;
+
 	filename := s.GetPidFilename()
 	os.WriteFile(filename, []byte(strconv.Itoa(pid)), 0666)
-	log.Printf("Registering PID file '%s'\n", filename)
 
 	err = cmd.Wait()
 
+	s.lid.logger.Printf("'%s' exited\n", s.name)
+
 	if err != nil {
-		log.Printf("Command exited with error: %v", err)
-	}
-
-	if exitErr, ok := err.(*exec.ExitError); ok {
-		s.onExit(false, exitErr)
+		s.lid.logger.Printf("Command exited with error: %v", err)
+		s.onExit(err.(*exec.ExitError), func() {
+			s.lid.logger.Printf("Restarting '%s'...\n", s.name)
+			s.Start()
+		})
 	} else {
-		s.onExit(true, nil)
+		s.onExit(nil, s.Start)
 	}
 
-	log.Printf("Command exited\n")
 }
 
 func (s *Service) Stop() error {
