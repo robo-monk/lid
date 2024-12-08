@@ -1,32 +1,22 @@
 package main
 
 import (
-	"fmt"
 	"log"
 	"os"
 	"os/exec"
-	"strconv"
 	"strings"
 	"time"
-
-	"github.com/shirou/gopsutil/v4/process"
 )
 
-type ExitEvent struct {
-	code int
+func assert(condition bool, message string) {
+	if !condition {
+		log.Fatalf("Assertion error: %s\n", message)
+	}
 }
-type Service struct {
-
-	name 	string
-	cwd		string
-	cmd		string
-
-	onExit 	func(e ExitEvent)
-}
-
 
 type Lid struct {
-	services []Service
+	// services []Service
+	services map[string]*Service
 	logger *log.Logger
 }
 
@@ -38,80 +28,69 @@ func New() *Lid {
 
 	return &Lid {
 		logger: log.New(logFile, "LOG: ", log.Ldate|log.Ltime|log.Lshortfile),
-		services: []Service {},
+		services: make(map[string]*Service),
 	}
 }
 
-func (lid *Lid) Register(serviceName string, s Service) {
+func (lid *Lid) Register(serviceName string, s *Service) {
 	s.name = serviceName;
-	lid.services = append(lid.services, s)
-}
-
-func wrap(s Service) string {
-	lidExec, _ := os.Executable()
-	cmd := ""
-	cmd += fmt.Sprintf("%s --event start %s;", lidExec, s.name)
-	cmd += fmt.Sprintf("(%s);", s.cmd)
-	cmd += "exit_code=$?;"
-	cmd += fmt.Sprintf("%s --event exited %s $exit_code", lidExec, s.name)
-	fmt.Println(cmd)
-	return cmd
-}
-
-func (s Service) getPidFilename() string {
-	return fmt.Sprintf("/tmp/lid-%s.pid", s.name)
+	lid.services[serviceName] = s
 }
 
 
-var (
-	ErrProcessNotFound = fmt.Errorf("Process Not Found")
-	ErrProcessCorrupt = fmt.Errorf("Process Not Found")
-	// ErrProcessNotFound = fmt.Errorf("Process Not Found")
-)
+func (lid *Lid) Fork(args ...string) {
+	// exe
+	executablePath, _ := os.Executable();
+	cmd := exec.Command(executablePath, args...)
 
-func (s Service) getProcess() (*process.Process, error) {
-	pidContent, fileErr := os.ReadFile(s.getPidFilename())
+	// fork
+	cmd.Start()
+	cmd.Process.Release()
 
-	if fileErr != nil {
-		if os.IsNotExist(fileErr) {
-			return nil, ErrProcessNotFound
-		} else {
-			// log.Printf("%s	| CORRUPT  (%s)\n", service.name, fileErr.Error())
-			return nil, ErrProcessCorrupt
-		}
-	} else {
-		pid, err := strconv.Atoi(string(pidContent))
+}
 
-		if err != nil {
-			return nil, ErrProcessCorrupt
+
+func (lid *Lid) Start() {
+	for _, service := range lid.services {
+
+		proc, _ := service.getProcess()
+		if proc != nil {
+			log.Printf("Service '%s' is already running with PID %d\n", service.name, proc.Pid)
+			continue
 		}
 
-		p, err  := process.NewProcess(int32(pid))
+		log.Printf("Starting '%s' \n", service.name)
+		lid.Fork("--start-process", service.name)
+	}
 
-		if err != nil {
-			os.Remove(s.getPidFilename());
-			return nil, ErrProcessNotFound
-		}
+}
 
-		return p, nil
+func (lid *Lid) Stop() {
+	for _, service := range lid.services {
+		service.Stop()
+		lid.logger.Printf("Stop %s\n", service.name)
 	}
 }
 
-func recursiveKill(p *process.Process) {
-	children, _ := p.Children()
-	for _, child := range children {
-		recursiveKill(child)
-	}
-	p.Kill()
-}
+func (lid *Lid) List() {
+	for _, service := range lid.services {
+		proc, _ := service.getProcess()
 
+		if proc == nil {
+			log.Printf("%s	| STOPPED\n", service.name)
+			continue
+		}
+
+		createTime, _ := proc.CreateTime()
+		upTime := time.Now().UnixMilli() - createTime
+		cpu, _ := proc.CPUPercent()
+
+		log.Printf("%s	| RUNNING (%d mins) [%f%%]\n", service.name, (upTime / 1000 / 60), cpu)
+	}
+}
 
 const invalidUsage = ("Invalid usage. Usage lid start | status")
 func main() {
-	// executablePath, _ := os.Executable();
-
-	// fmt.Println("os.Executable", executablePath);
-	// fmt.Println(len(os.Args), os.Args)
 
 	if len(os.Args) < 2 {
 		panic(invalidUsage)
@@ -119,78 +98,46 @@ func main() {
 
 	lid := New()
 
-	lid.Register("pocketbase", Service {
-		cmd: 	`cd ../../convex/convex/pocketbase && dotenv -- ./convex-pb serve`,
-		onExit: func (e ExitEvent) {
-			fmt.Printf("Process exited\n")
+	lid.Register("pocketbase", &Service {
+		cwd: "../../convex/convex/pocketbase",
+		command: []string { "./convex-pb", "serve"},
+		envFile: ".env",
+		onExit: func (ok bool, e *exec.ExitError) {
+			if ok {
+				lid.logger.Printf(" -- Pocketbase grafully shut down\n")
+			} else {
+				lid.logger.Printf(" -- Pocketbase Exited with %d; %v\n", e.ExitCode(), ok)
+			}
 		},
 	});
 
 
-	lid.Register("test", Service {
-		cmd: 	`sleep 4; exit 42`,
-		onExit: func (e ExitEvent) {
-			fmt.Printf("Process exited\n")
+	lid.Register("test", &Service {
+		command: []string { "bash", "-c", "sleep 5;exit 0" },
+		onExit: func (ok bool, e *exec.ExitError) {
+			if ok {
+				lid.logger.Printf(" -- error code ok %v\n", ok)
+			} else {
+				lid.logger.Printf(" -- Sleep Exited with %d; %v\n", e.ExitCode(), ok)
+			}
 		},
 	});
 
 	switch os.Args[1] {
 	case "start":
-		for _, service := range lid.services {
-
-			proc, _ := service.getProcess()
-			if proc != nil {
-				log.Printf("service '%s' is already running with PID %d \n", service.name, proc.Pid)
-				continue
-			}
-
-			fmt.Printf("Starting service %s\n", service.name);
-
-			fmt.Println("Starting command..")
-			cmd := exec.Command("bash", "-c", wrap(service))
-			// cmd.Stdout = os.Stdout
-			// cmd.Stderr = os.Stderr
-
-			// Start the command in the background
-			err := cmd.Start()
-			if err != nil {
-				log.Fatalf("Failed to start command: %v", err)
-			}
-
-			// Get the PID of the background process
-			log.Printf("Started process with PID: %d", cmd.Process.Pid)
-			pid := cmd.Process.Pid;
-			filename := service.getPidFilename()
-			os.WriteFile(filename, []byte(strconv.Itoa(pid)), 0666)
-			log.Printf("Registering PID file '%s'\n", filename)
-		}
+		lid.Start()
 	case "stop":
-		for _, service := range lid.services {
-			process, err := service.getProcess()
-			if err != nil {
-				log.Printf("Service '%s' is already down\n", service.name)
-				continue;
-			}
-
-			log.Printf("Stopping '%s \n", service.name)
-			recursiveKill(process)
-			lid.logger.Printf("Stop %s\n", service.name)
-		}
+		lid.Stop()
+	case "restart":
+		lid.Stop()
+		lid.Start()
+	case "ls":
+		fallthrough
 	case "list":
-		for _, service := range lid.services {
-			proc, _ := service.getProcess()
-
-			if proc == nil {
-				log.Printf("%s	| STOPPED\n", service.name)
-				continue
-			}
-
-			createTime, _ := proc.CreateTime()
-			upTime := time.Now().UnixMilli() - createTime
-			cpu, _ := proc.CPUPercent()
-
-			log.Printf("%s	| RUNNING (%d mins) [%f%%]\n", service.name, (upTime / 1000 / 60), cpu)
-		}
+		lid.List()
+	case "--start-process":
+		serviceName := os.Args[2]
+		lid.services[serviceName].Start()
 	case "--event":
 		lid.logger.Printf("EVENT: %s\n", strings.Join(os.Args, ", "))
 	default:
