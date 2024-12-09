@@ -1,8 +1,8 @@
 package lid_test
 
 import (
-	// "os"
-	"fmt"
+	"log"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"sync"
@@ -70,10 +70,8 @@ func TestReadServiceProcessFileNotFound(t *testing.T) {
 
 func TestNewService(t *testing.T) {
 	// t.Parallel()
-	m := lid.New();
-
 	s := lid.Service {
-		Lid:     m,
+ 		Logger:	log.New(os.Stdout, "[TEST] ", 0),
 		Name:    "test-process",
 		// Cwd:     "",
 		Command: []string{ "bash", "-c", "sleep 1; exit 1"},
@@ -85,10 +83,8 @@ func TestNewService(t *testing.T) {
 }
 
 func TestNewServiceStart(t *testing.T) {
-	m := lid.New();
-
 	s := lid.Service {
-		Lid:     m,
+		Logger:	log.New(os.Stdout, "[TEST] ", 0),
 		Name:    "test-process",
 		// Cwd:     "",
 		Command: []string{ "bash", "-c", "sleep 0.1; exit 1"},
@@ -122,10 +118,8 @@ func TestNewServiceStart(t *testing.T) {
 }
 
 func TestNewServiceStartStop(t *testing.T) {
-	m := lid.New();
-
 	s := lid.Service {
-		Lid:     m,
+		Logger:	log.New(os.Stdout, "[TEST] ", 0),
 		Name:    "test-process",
 		Command: []string{ "bash", "-c", "sleep 5; exit 0"},
 	}
@@ -163,12 +157,10 @@ func TestNewServiceStartStop(t *testing.T) {
 }
 
 func TestNewServiceOnExit(t *testing.T) {
-	m := lid.New();
-
 	recievedErrorCode := -1
 
 	s := lid.Service {
-		Lid:     m,
+		Logger:	log.New(os.Stdout, "[TEST] ", 0),
 		Name:    "test-process",
 		Command: []string{ "bash", "-c", "sleep 0; exit 32"},
 		OnExit: func(e *exec.ExitError, self *lid.Service) {
@@ -186,12 +178,10 @@ func TestNewServiceOnExit(t *testing.T) {
 }
 
 func TestNewServiceOnExitDoesNotRunWhenStopped(t *testing.T) {
-	m := lid.New();
-
 	recievedErrorCode := -1
 
 	s := lid.Service {
-		Lid:     m,
+		Logger:	log.New(os.Stdout, "[TEST] ", 0),
 		Name:    "test-process",
 		Command: []string{ "bash", "-c", "sleep 5; exit 32"},
 		OnExit: func(e *exec.ExitError, self *lid.Service) {
@@ -228,13 +218,11 @@ func TestNewServiceOnExitDoesNotRunWhenStopped(t *testing.T) {
 }
 
 func TestNewServiceStartStart(t *testing.T) {
-	m := lid.New();
-
 	recievedErrorCode := -1
 
 	s := lid.Service {
-		Lid:     m,
-		Name:    "test-process-2",
+		Logger:	log.New(os.Stdout, "[TEST] ", 0),
+		Name:    "test-process",
 		Command: []string{ "bash", "-c", "sleep 1; exit 32"},
 		OnExit: func(e *exec.ExitError, self *lid.Service) {
 			recievedErrorCode = e.ExitCode()
@@ -247,7 +235,8 @@ func TestNewServiceStartStart(t *testing.T) {
 
 	go func(){
 		defer wg.Done()
-		s.Start()
+		err := s.Start()
+		assert.Nil(t, err)
 	}()
 
 	start := time.Now().UnixMilli()
@@ -261,7 +250,8 @@ func TestNewServiceStartStart(t *testing.T) {
 
 	err := s.Start()
 
-	assert.ErrorIs(t, err, fmt.Errorf("Service 'test-process-2' is already running\n"))
+	assert.NotNil(t, err)
+	assert.Equal(t, err.Error(), "Service 'test-process' is already running\n")
 	assert.Equal(t, lid.RUNNING, s.GetStatus(), "Process should be still RUNNING")
 	assert.Equal(t, currentPid, s.GetPid(), "PID should be the same")
 	s.Stop()

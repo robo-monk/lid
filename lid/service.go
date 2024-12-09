@@ -124,9 +124,10 @@ func (s *Service) Start() error {
 	cmd, err := s.PrepareCommand()
 	if err != nil {
 		s.Logger.Printf("%v\n", err);
+		return err
 	}
 
-	s.Logger.Printf("START %v\n", cmd);
+	s.Logger.Printf("Command: %v\n", cmd);
 
 	err = cmd.Start()
 	if err != nil {
