@@ -14,112 +14,44 @@ It aims to have:
 ## Usage
 1. Create a `lid` directory in the root of your monorepo
 2. Create a `lid/lid.go`
+
 ```go
+package main
+
 import (
+	"os/exec"
 	"github.com/robo-monk/lid/lid"
 )
 
 func main() {
-	m := lid.New()
-	m.Register("pocketbase", &lid.Service {
-		cwd: "../pocketbase",
-		cmd: "./pocketbase serve"
-		envFile: ".env",
-		onExit: func (e *exec.ExitError, s *lid.Service) {
-			if e != nil {
-				lid.logger.Printf("Pocketbase exited with bad error: %v\n", e)
-			}
 
-			restart()
-		}
-	})
+    manager := lid.New()
+
+    manager.Register("pocketbase", &lid.Service{
+        Cwd:     "../../../../convex/convex/pocketbase",
+        Command: []string{"./convex-pb", "serve"},
+        EnvFile: ".env",
+        OnExit: func(e *exec.ExitError, service *lid.Service) {
+           	service.Logger.Println("POCKETBASE FAILED")
+           	service.Start()
+        },
+    })
+
+
+
+    manager.Register("test", &lid.Service{
+        Command: []string{"bash", "-c", "sleep 2; exit 1"},
+        OnExit: func(e *exec.ExitError, service *lid.Service) {
+           	service.Logger.Println("FAILED")
+           	service.Start()
+        },
+    })
+
+    manager.Run()
 }
 ```
 
-
-```go
-// lid.go
-func main() {
-
-	lid.Register("pocketbase", Service {
-		cwd: 	"../../convex/convex/pocketbase"
-		cmd: 	`dotenv -- ./convex-pb serve`
-		onExit: func (e *ExitEvent, restart *Restart) {
-			logToTelgram(e)
-			restart()
-		}
-	})
-
-	lid.Register("convex-insights-server", Service {
-		cwd: 	"../../convex/convex/convex-insights/server"
-		cmd: 	`dotenv -- ./dist/server`
-		onExit: func (e *ExitEvent, restart *Restart) {
-			logToTelgram(e)
-			restart()
-		}
-	})
-}
-```
-`lid start pocketbase`
-lid --event start pocketbase
-echo "start pocketbase"
-cmd="sleep 100; exit 42";
-echo "Command: $cmd";
-(eval "$cmd");
-exit_code=$?;
-echo "Exit Code: $exit_code"
-echo "exit pocketbase"
-lid --event exited pocketbase $exit_code
-
-
-```
-# Lidfile
-
-@start pocketbase
-  cd ../../convex/convex/pocketbase
-  dotenv -- ./convex-pb serve
-
-@on_event
-  ./logger.ts
-```
-
-lid start pocketbase
---> spawn pocketbase
-
-### run it as a service
+### Run it as a service
 ```
 system-ctl enable --now cd <dir-with-lidfile> && lid start
 ```
-
-```
-lid start convex-forms
-```
-
-```
-lid restart convex-forms
-```
-
-```
-lid stop convex-forms
-```
-
-```
-lid attach convex-forms
-```
-
-### callbacks if the service goes down
-
-### lid.go
-import (
-    "github.com/lid
-)
-
-func main() {
-    lid.Register("convex-forms", {
-        start: ""
-    })
-}
-
-
-convex-forms:
-    start

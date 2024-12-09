@@ -109,11 +109,33 @@ func (lid *Lid) List() {
 	}
 }
 
-const invalidUsage = "invalid usage"
+func (lid *Lid) GetUsage() string {
+	usage := `Usage:
+  lid start             # Starts all registered services
+  lid start <service>   # Starts a specific service
+  lid stop              # Stops all running services
+  lid stop <service>    # Stops a specific service
+  lid restart           # Restarts all services
+  lid restart <service> # Restarts a specific service
+  lid list              # Lists the status of all services
+
+Registered services:
+`
+
+	if len(lid.services) == 0 {
+		usage += "  (No services registered)\n"
+	} else {
+		for serviceName := range lid.services {
+			usage += fmt.Sprintf("  - %s\n", serviceName)
+		}
+	}
+
+	return usage
+}
 
 func (lid *Lid) Run() {
 	if len(os.Args) < 2 {
-		panic(invalidUsage)
+		panic(lid.GetUsage())
 	}
 
 	switch os.Args[1] {
@@ -137,6 +159,6 @@ func (lid *Lid) Run() {
 		}
 	default:
 		// panic("Invalid usage")
-		panic(invalidUsage)
+		panic(lid.GetUsage())
 	}
 }
