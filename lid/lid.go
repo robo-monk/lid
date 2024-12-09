@@ -110,16 +110,21 @@ func (lid *Lid) List() {
 }
 
 func (lid *Lid) GetUsage() string {
-	usage := `Usage:
-  lid start             # Starts all registered services
-  lid start <service>   # Starts a specific service
-  lid stop              # Stops all running services
-  lid stop <service>    # Stops a specific service
-  lid restart           # Restarts all services
-  lid restart <service> # Restarts a specific service
-  lid list              # Lists the status of all services
+	usage := `lid CLI
 
-Registered services:
+Usage:
+  lid [command]
+
+Available commands:
+  start             	Starts all registered services
+  start <service>   	Starts a specific service
+  stop              	Stops all running services
+  stop <service>    	Stops a specific service
+  restart           	Restarts all services
+  restart <service> 	Restarts a specific service
+  list              	Lists the status of all services
+
+Available services:
 `
 
 	if len(lid.services) == 0 {
@@ -134,8 +139,9 @@ Registered services:
 }
 
 func (lid *Lid) Run() {
+	log.SetFlags(0)
 	if len(os.Args) < 2 {
-		panic(lid.GetUsage())
+		log.Fatal(lid.GetUsage())
 	}
 
 	switch os.Args[1] {
@@ -158,7 +164,6 @@ func (lid *Lid) Run() {
 			lid.logger.Printf("Could not start %s: %v\n", serviceName, err)
 		}
 	default:
-		// panic("Invalid usage")
-		panic(lid.GetUsage())
+		log.Fatal(lid.GetUsage())
 	}
 }
