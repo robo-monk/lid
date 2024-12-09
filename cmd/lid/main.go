@@ -13,7 +13,7 @@ func main() {
         Cwd:     "../pocketbase",
         Command: []string{"./pocketbase", "serve"},
         EnvFile: ".env",
-        OnFail: func(e *exec.ExitError, service *lid.Service) {
+        OnExit: func(e *exec.ExitError, service *lid.Service) {
             // if service.GetStatus() != lid.STOPPED {
            	manager.Logger.Println("POCKETBASE FAILED")
            	service.Start()

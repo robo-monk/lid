@@ -23,11 +23,11 @@ const (
 )
 
 
-
 type ServiceProcess struct {
 	Status 	ServiceStatus
 	Pid		int32
 }
+
 
 func (sp ServiceProcess) WriteToFile(filename string) error {
 	buf := new(bytes.Buffer)
@@ -62,17 +62,15 @@ type Service struct {
 	Command []string
 	EnvFile	string
 
-	OnFail 	func(e *exec.ExitError, self *Service)
+	// OnStop 	func(e *exec.ExitError, self *Service)
 	OnExit 	func(e *exec.ExitError, self *Service)
 }
-
-
 
 func (s *Service) GetServiceProcessFilename() string {
 	return fmt.Sprintf("/tmp/service-%s.lid", s.Name)
 }
 
-func (s *Service) syncProcessState() ServiceProcess {
+func (s *Service) getCachedProcessState() ServiceProcess {
 	sp, error := ReadServiceProcess(s.GetServiceProcessFilename())
 	if error != nil {
 		return ServiceProcess {
@@ -80,18 +78,6 @@ func (s *Service) syncProcessState() ServiceProcess {
 			Status: STOPPED,
 		}
 	}
-
-	exists, error := process.PidExists(int32(sp.Pid))
-
-	// sync file
-	if error != nil || !exists {
-		sp.Pid = NO_PID
-		if (sp.Status != STOPPED) && (sp.Status != EXITED) {
-			sp.Status = STOPPED
-		}
-		s.WriteServiceProcess(sp)
-	}
-
 	return sp
 }
 
@@ -100,12 +86,12 @@ func (s *Service) WriteServiceProcess(sp ServiceProcess) error {
 }
 
 func (s *Service) GetProcess() (*process.Process, error) {
-	proc := s.syncProcessState()
+	proc := s.getCachedProcessState()
 	return  process.NewProcess(int32(proc.Pid))
 }
 
 func (s *Service) GetPid() int32 {
-	return s.syncProcessState().Pid
+	return s.getCachedProcessState().Pid
 }
 
 func (s *Service) Start() {
@@ -146,36 +132,30 @@ func (s *Service) Start() {
 	// Get the PID of the background process
 	s.Lid.Logger.Printf("Started '%s' with PID: %d", s.Name, cmd.Process.Pid)
 
-	sp := ServiceProcess {
+	s.WriteServiceProcess(ServiceProcess {
 		Status: RUNNING,
-		Pid:    int32(cmd.Process.Pid),
-	}
+		Pid: 	int32(cmd.Process.Pid),
+	})
 
-	s.WriteServiceProcess(sp)
 	err = cmd.Wait()
 
-	s.Lid.Logger.Printf("'%s' exited\n", s.Name)
+	s.Lid.Logger.Printf("'%s' exited (%v)\n", s.Name, s.GetStatus())
 
+	// s.GetStatus()
 	// check if we got stopped with ./lid stop
-	if sp.Status != STOPPED {
-		sp.Status = EXITED
-		sp.Pid = NO_PID
-		s.WriteServiceProcess(sp)
-	}
 
-	sp = s.syncProcessState()
+	if s.GetStatus() != STOPPED {
+		s.WriteServiceProcess(ServiceProcess {
+			Status: EXITED,
+			Pid:	NO_PID,
+		})
+
+		if s.OnExit != nil {
+			s.OnExit(err.(*exec.ExitError), s)
+		}
+	};
 
 	s.Lid.Logger.Printf("Command exited with error: %v", err)
-
-	if s.OnExit != nil {
-		s.OnExit(err.(*exec.ExitError), s)
-	}
-
-	if sp.Status != STOPPED {
-		if s.OnFail != nil {
-			s.OnFail(err.(*exec.ExitError), s)
-		}
-	}
 }
 
 func (s *Service) Stop() error {
@@ -186,18 +166,18 @@ func (s *Service) Stop() error {
 	}
 
 	log.Printf("Stopping service '%s'\n", s.Name)
+
+	s.WriteServiceProcess(ServiceProcess {
+		Status: STOPPED,
+		Pid:    NO_PID,
+	})
+
 	recursiveKill(process)
-
-
-	proc := s.syncProcessState()
-	proc.Status = STOPPED
-	proc.Pid = NO_PID
-	s.WriteServiceProcess(proc)
 	return nil
 }
 
 func (s *Service) GetStatus() ServiceStatus {
-	process := s.syncProcessState()
+	process := s.getCachedProcessState()
 	return process.Status
 }
 

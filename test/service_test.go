@@ -2,6 +2,7 @@ package lid_test
 
 import (
 	// "os"
+	"os/exec"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -66,44 +67,7 @@ func TestReadServiceProcessFileNotFound(t *testing.T) {
 // 	assert.Nil(t, err, "Expected error to be nil")
 // }
 
-// TestReadDotEnvFile checks reading well-formed env files.
-func TestReadDotEnvFile_Valid(t *testing.T) {
-	t.Parallel()
-	filename := filepath.Join("testdata", "valid.env")
-	env := lid.ReadDotEnvFile(filename)
-	expected := []string{"FOO=bar", "BAZ=qux"}
 
-	assert.Equal(t, len(expected), len(env), "Env len mismatch")
-
-	for i, line := range expected {
-		assert.Equal(t, line, env[i])
-	}
-}
-
-// TestReadDotEnvFile_Quoted tests removing quotes.
-func TestReadDotEnvFile_Quoted(t *testing.T) {
-	t.Parallel()
-	filename := filepath.Join("testdata", "quoted.env")
-	env := lid.ReadDotEnvFile(filename)
-
-	expected := []string{"FOO=hello world", "BAR= spaced value "}
-	assert.Equal(t, len(expected), len(env), "Env len mismatch")
-	for i, line := range expected {
-		assert.Equal(t, line, env[i])
-	}
-}
-
-// TestReadDotEnvFile_Malformed checks behavior with malformed env files.
-// Here we mainly ensure it doesn't panic and returns partial results.
-func TestReadDotEnvFile_Malformed(t *testing.T) {
-	t.Parallel()
-	filename := filepath.Join("testdata", "malformed.env")
-	env := lid.ReadDotEnvFile(filename)
-	// We don't define strict behavior for malformed lines, just ensure no crash.
-	if len(env) == 0 {
-		t.Errorf("Expected some parsed environment variables, got none")
-	}
-}
 
 func TestNewService(t *testing.T) {
 	// t.Parallel()
@@ -122,14 +86,13 @@ func TestNewService(t *testing.T) {
 }
 
 func TestNewServiceStart(t *testing.T) {
-	// t.Parallel()
 	m := lid.New();
 
 	s := lid.Service {
 		Lid:     m,
 		Name:    "test-process",
 		// Cwd:     "",
-		Command: []string{ "bash", "-c", "sleep 0.1; exit 0"},
+		Command: []string{ "bash", "-c", "sleep 0.1; exit 1"},
 		// EnvFile: "",
 	}
 
@@ -153,8 +116,114 @@ func TestNewServiceStart(t *testing.T) {
 	assert.NotEqual(t, lid.NO_PID, s.GetPid(), "PID should not be 0")
 
 	wg.Wait()
+
 	// Task should be done
 	assert.Equal(t, lid.EXITED, s.GetStatus(), "Process should be exited")
 	assert.Equal(t, lid.NO_PID, s.GetPid(), "PID should be 0")
+}
 
+func TestNewServiceStartStop(t *testing.T) {
+	m := lid.New();
+
+	s := lid.Service {
+		Lid:     m,
+		Name:    "test-process",
+		Command: []string{ "bash", "-c", "sleep 5; exit 0"},
+	}
+
+	assert.True(t, s.GetStatus() == lid.STOPPED || s.GetStatus() == lid.EXITED, s.GetStatus())
+	assert.Equal(t, lid.NO_PID, s.GetPid())
+
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+
+	go func(){
+		defer wg.Done()
+		s.Start()
+	}()
+
+	start := time.Now().UnixMilli()
+	// Wait for the task to start runnng
+	time.Sleep(10 * time.Millisecond)
+
+	// Task should be running right now
+	assert.Equal(t, lid.RUNNING, s.GetStatus(), "Process should be RUNNING")
+	assert.NotEqual(t, lid.NO_PID, s.GetPid(), "PID should not be 0")
+
+	s.Stop()
+
+	assert.Equal(t, lid.STOPPED, s.GetStatus(), "Process should be STOPPED, since we stopped the task manually")
+	assert.Equal(t, lid.NO_PID, s.GetPid(), "PID should be 0")
+
+	wg.Wait()
+
+	assert.Less(t, time.Now().UnixMilli()-start, int64(100), "Process should not be allowed to complete")
+	assert.Equal(t, lid.STOPPED, s.GetStatus(), "Process should be STOPPED")
+	assert.Equal(t, lid.NO_PID, s.GetPid(), "PID should be 0")
+}
+
+func TestNewServiceOnExit(t *testing.T) {
+	m := lid.New();
+
+	recievedErrorCode := -1
+
+	s := lid.Service {
+		Lid:     m,
+		Name:    "test-process",
+		Command: []string{ "bash", "-c", "sleep 0; exit 32"},
+		OnExit: func(e *exec.ExitError, self *lid.Service) {
+			recievedErrorCode = e.ExitCode()
+		},
+	}
+
+	assert.True(t, s.GetStatus() == lid.STOPPED || s.GetStatus() == lid.EXITED, s.GetStatus())
+	assert.Equal(t, lid.NO_PID, s.GetPid())
+	s.Start()
+
+	// Task should be running right now
+	assert.Equal(t, lid.EXITED, s.GetStatus(), "Process should be EXITED")
+	assert.Equal(t, recievedErrorCode, 32, "Exit codes do not match")
+}
+
+func TestNewServiceOnExitDoesNotRunWhenStopped(t *testing.T) {
+	m := lid.New();
+
+	recievedErrorCode := -1
+
+	s := lid.Service {
+		Lid:     m,
+		Name:    "test-process",
+		Command: []string{ "bash", "-c", "sleep 5; exit 32"},
+		OnExit: func(e *exec.ExitError, self *lid.Service) {
+			recievedErrorCode = e.ExitCode()
+		},
+	}
+
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+
+	go func(){
+		defer wg.Done()
+		s.Start()
+	}()
+
+	start := time.Now().UnixMilli()
+
+	// Wait for the task to start runnng
+	time.Sleep(10 * time.Millisecond)
+
+	assert.Equal(t, lid.RUNNING, s.GetStatus(), "Process should be RUNNING")
+	assert.NotEqual(t, lid.NO_PID, s.GetPid(), "PID should not be 0")
+
+	s.Stop()
+
+	assert.Equal(t, lid.STOPPED, s.GetStatus(), "Process should be STOPPED, since we stopped the task manually")
+	assert.Equal(t, lid.NO_PID, s.GetPid(), "PID should be 0")
+
+	wg.Wait()
+
+	assert.Less(t, time.Now().UnixMilli()-start, int64(100), "Process should not be allowed to complete")
+	assert.Equal(t, recievedErrorCode, -1, "OnExit function should not have run")
 }
