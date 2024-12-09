@@ -16,16 +16,16 @@ It aims to have:
 2. Create a `lid/lid.go`
 ```go
 import (
-	"github.com/robo-monk/lid"
+	"github.com/robo-monk/lid/lid"
 )
 
 func main() {
 	m := lid.New()
-	m.Register("pocketbase", Service {
+	m.Register("pocketbase", &lid.Service {
 		cwd: "../pocketbase",
 		cmd: "./pocketbase serve"
 		envFile: ".env",
-		onExit: func (e *exec.ExitError, restart func()) {
+		onExit: func (e *exec.ExitError, s *lid.Service) {
 			if e != nil {
 				lid.logger.Printf("Pocketbase exited with bad error: %v\n", e)
 			}

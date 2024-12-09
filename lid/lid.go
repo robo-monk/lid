@@ -1,4 +1,4 @@
-package main
+package lid
 
 import (
 	"log"
@@ -7,16 +7,10 @@ import (
 	"time"
 )
 
-func assert(condition bool, message string) {
-	if !condition {
-		log.Fatalf("Assertion error: %s\n", message)
-	}
-}
-
 type Lid struct {
 	// services []Service
 	services map[string]*Service
-	logger *log.Logger
+	Logger *log.Logger
 }
 
 func New() *Lid {
@@ -26,14 +20,14 @@ func New() *Lid {
 	}
 
 	return &Lid {
-		logger: log.New(logFile, "", log.Ldate|log.Ltime),
+		Logger: log.New(logFile, "", log.Ldate|log.Ltime),
 		services: make(map[string]*Service),
 	}
 }
 
 func (lid *Lid) Register(serviceName string, s *Service) {
-	s.name = serviceName;
-	s.lid = lid
+	s.Name = serviceName;
+	s.Lid = lid
 	lid.services[serviceName] = s
 }
 
@@ -52,14 +46,14 @@ func (lid *Lid) Fork(args ...string) {
 func (lid *Lid) Start() {
 	for _, service := range lid.services {
 
-		proc, _ := service.getProcess()
+		proc, _ := service.GetProcess()
 		if proc != nil {
-			log.Printf("Service '%s' is already running with PID %d\n", service.name, proc.Pid)
+			log.Printf("Service '%s' is already running with PID %d\n", service.Name, proc.Pid)
 			continue
 		}
 
-		log.Printf("Starting '%s' \n", service.name)
-		lid.Fork("--start-service", service.name)
+		log.Printf("Starting '%s' \n", service.Name)
+		lid.Fork("--start-service", service.Name)
 	}
 
 }
@@ -68,17 +62,17 @@ func (lid *Lid) Stop() {
 	for _, service := range lid.services {
 		err := service.Stop()
 		if err == nil {
-			lid.logger.Printf("Stop %s\n", service.name)
+			lid.Logger.Printf("Stop %s\n", service.Name)
 		}
 	}
 }
 
 func (lid *Lid) List() {
 	for _, service := range lid.services {
-		proc, _ := service.getProcess()
+		proc, _ := service.GetProcess()
 
 		if proc == nil {
-			log.Printf("%s	| STOPPED\n", service.name)
+			log.Printf("%s	| STOPPED\n", service.Name)
 			continue
 		}
 
@@ -86,34 +80,16 @@ func (lid *Lid) List() {
 		upTime := time.Now().UnixMilli() - createTime
 		cpu, _ := proc.CPUPercent()
 
-		log.Printf("%s	| RUNNING (%d mins) [%f%%]\n", service.name, (upTime / 1000 / 60), cpu)
+		log.Printf("%s	| RUNNING (%d mins) [%f%%]\n", service.Name, (upTime / 1000 / 60), cpu)
 	}
 }
 
-const invalidUsage = ("Invalid usage. Usage lid start | status")
-func main() {
+const invalidUsage = "invalid usage"
 
+func (lid *Lid) Run() {
 	if len(os.Args) < 2 {
 		panic(invalidUsage)
 	}
-
-	lid := New()
-
-	lid.Register("pocketbase", &Service {
-		cwd: "../../convex/convex/pocketbase",
-		command: []string { "./convex-pb", "serve"},
-		envFile: ".env",
-	});
-
-
-	lid.Register("test", &Service {
-		command: []string { "bash", "-c", "sleep 5; exit 1" },
-		onExit: func (e *exec.ExitError, restart func()) {
-			if e != nil && e.ExitCode() != -1 {
-				restart()
-			}
-		},
-	});
 
 	switch os.Args[1] {
 	case "start":
@@ -131,6 +107,7 @@ func main() {
 		serviceName := os.Args[2]
 		lid.services[serviceName].Start()
 	default:
+		// panic("Invalid usage")
 		panic(invalidUsage)
 	}
 }
