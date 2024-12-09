@@ -1,15 +1,16 @@
 # lid
 
-Lid is a very simple process manager inspired by pocketbase and pm2.
-I use it in a monorepo to orchestrate various processes in production.
+Lid is a very simple process manager written in Go. It is a lightweight alternative to pm2 and forever.
+It is inspired by the fantastic DX of [Pocketbase](https://pocketbase.io/) and follows similar patterns.
 
 It aims to have:
-- No background deamon
-- Very simple interface
-- Callbacks when processes exit
-- Zero(ish?) downtime when restarting applications
+- **No Background Daemon**
+- **Simple Interface**
+- **Configurable Behavior**
+- **Zero Downtime**
+- **Agnostic Process Support**
 
-> young code use with care
+> This project is in alpha. Use with caution.
 
 ### Recommended Installation
 1.  Create a `lid` directory in the root of your monorepo
@@ -54,32 +55,30 @@ func main() {
     manager := lid.New()
 
     manager.Register("pocketbase", &lid.Service{
-        Cwd:     	"../pocketbase",
-        Command: 	[]string{"./pocketbase", "serve"},
-        EnvFile: 	".env",
-        OnExit: 	func(e *exec.ExitError, service *lid.Service) {
-           	service.Logger.Println("pocketbase failed")
-
-            // ... log the error further
-
-            // Restart the service
+        Cwd:      "../pocketbase",
+        Command:  []string{"./pocketbase", "serve"},
+        EnvFile:  ".env",
+        OnExit:   func(e *exec.ExitError, service *lid.Service) {
+		service.Logger.Println("pocketbase failed")
+            	// ... log the error further
+            	// Restart the service
            	service.Start()
         },
     })
 
     manager.Register("backend", &lid.Service {
-    		Cwd: 			"../server"
-      	EnvFile:	".production.env"
-        Command: 	[]string{"./dist/server"},
-        OnExit: 	func(e *exec.ExitError, service *lid.Service) {
+        Cwd: 	 "../server"
+      	EnvFile: ".production.env"
+        Command: []string{"./dist/server"},
+        OnExit:  func(e *exec.ExitError, service *lid.Service) {
            	service.Start()
         },
     })
 
     manager.Register("frontend", &lid.Service {
-      	Cwd: 			"../frontend"
-        Command: 	[]string{ "pnpm", "run", "start" },
-        OnExit: 	func(e *exec.ExitError, service *lid.Service) {
+      	Cwd: 	 "../frontend"
+        Command: []string{ "pnpm", "run", "start" },
+        OnExit:  func(e *exec.ExitError, service *lid.Service) {
            	service.Start()
         },
     })
