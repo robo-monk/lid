@@ -3,15 +3,15 @@ package lid
 import (
 	"bufio"
 	"fmt"
-	"log"
 	"os"
 	"strings"
 )
 
-func ReadDotEnvFile(filename string) []string {
+func ReadDotEnvFile(filename string) ([]string, error) {
 	file, err := os.Open(filename)
 	if err != nil {
-		log.Fatalf("Could not read env file%v\n", err)
+		return []string{}, err
+		// log.Fatalf("Could not read env file%v\n", err)
 	}
 	defer file.Close()
 
@@ -32,5 +32,5 @@ func ReadDotEnvFile(filename string) []string {
 
 		env = append(env, fmt.Sprintf("%s=%s", key, value))
 	}
-	return env
+	return env, nil
 }

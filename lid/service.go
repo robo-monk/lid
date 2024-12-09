@@ -55,7 +55,7 @@ func ReadServiceProcess(filename string) (ServiceProcess, error) {
 
 
 type Service struct {
-	Lid		*Lid
+	Logger  *log.Logger
 	Name 	string
 	Cwd		string
 
@@ -94,24 +94,10 @@ func (s *Service) GetPid() int32 {
 	return s.getCachedProcessState().Pid
 }
 
-func (s *Service) Start() error {
-
+func (s *Service) PrepareCommand() (*exec.Cmd, error) {
 	if s.GetStatus() == RUNNING {
-		return fmt.Errorf("Service '%s' is already running\n", s.Name)
+		return nil, fmt.Errorf("Service '%s' is already running\n", s.Name)
 	}
-	// process, err := s.GetProcess()
-
-	// if err == nil {
-	// 	if running, _ := process.IsRunning(); running {
-	// 		// log.Fatalf("Service '%s' is already running\n", s.Name)
-	// 	}
-
-	// 	os.Remove(s.GetServiceProcessFilename())
-	// }
-
-
-	fmt.Printf("Starting service %s\n", s.Name);
-	fmt.Printf("Current status is %d\n", s.GetStatus());
 
 	cmd := exec.Command(s.Command[0], s.Command[1:]...)
 
@@ -120,21 +106,37 @@ func (s *Service) Start() error {
 	}
 
 	if s.EnvFile != "" {
-		cmd.Env = ReadDotEnvFile(filepath.Join(s.Cwd, s.EnvFile))
+		var ferr error
+		cmd.Env, ferr = ReadDotEnvFile(filepath.Join(s.Cwd, s.EnvFile))
+		if ferr != nil{
+			return nil, ferr
+		}
 	}
 
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
+	return cmd, nil
+}
 
-	// Start the command in the background
-	err := cmd.Start()
+func (s *Service) Start() error {
+
+	cmd, err := s.PrepareCommand()
 	if err != nil {
-		return fmt.Errorf("Failed to start command: %v", err)
+		s.Logger.Printf("%v\n", err);
+	}
+
+	s.Logger.Printf("START %v\n", cmd);
+
+	err = cmd.Start()
+	if err != nil {
+		ferr := fmt.Errorf("Failed to start command: %v", err)
+		s.Logger.Printf("%v\n", ferr);
+		return ferr
 	}
 
 	// Get the PID of the background process
-	s.Lid.Logger.Printf("Started '%s' with PID: %d", s.Name, cmd.Process.Pid)
+	s.Logger.Printf("Started with PID: %d", cmd.Process.Pid)
 
 	s.WriteServiceProcess(ServiceProcess {
 		Status: RUNNING,
@@ -143,12 +145,12 @@ func (s *Service) Start() error {
 
 	err = cmd.Wait()
 
-	s.Lid.Logger.Printf("'%s' exited\n", s.Name)
-
-	// s.GetStatus()
-	// check if we got stopped with ./lid stop
+	if err != nil {
+		s.Logger.Printf("%v\n", err)
+	}
 
 	if s.getCachedProcessState().Status != STOPPED {
+		s.Logger.Println("Exited")
 		s.WriteServiceProcess(ServiceProcess {
 			Status: EXITED,
 			Pid:	NO_PID,
@@ -157,20 +159,20 @@ func (s *Service) Start() error {
 		if s.OnExit != nil {
 			s.OnExit(err.(*exec.ExitError), s)
 		}
-	};
+	} else {
+		s.Logger.Println("Stopped")
+	}
 
-	s.Lid.Logger.Printf("Command exited with error: %v", err)
 	return nil
 }
 
 func (s *Service) Stop() error {
 	process, err := s.GetProcess()
 	if err != nil {
-		log.Printf("Service '%s' is already down\n", s.Name)
-		return err
+		return fmt.Errorf("Service already down")
 	}
 
-	log.Printf("Stopping service '%s'\n", s.Name)
+	s.Logger.Println("Stopping service")
 
 	s.WriteServiceProcess(ServiceProcess {
 		Status: STOPPED,

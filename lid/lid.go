@@ -1,6 +1,7 @@
 package lid
 
 import (
+	"fmt"
 	"log"
 	"os"
 	"os/exec"
@@ -8,9 +9,8 @@ import (
 )
 
 type Lid struct {
-	// services []Service
 	services map[string]*Service
-	Logger *log.Logger
+	logger *log.Logger
 }
 
 func New() *Lid {
@@ -20,14 +20,15 @@ func New() *Lid {
 	}
 
 	return &Lid {
-		Logger: log.New(logFile, "", log.Ldate|log.Ltime),
+		logger: log.New(logFile, "", log.Ldate|log.Ltime),
 		services: make(map[string]*Service),
 	}
 }
 
 func (lid *Lid) Register(serviceName string, s *Service) {
+	logFile, _ := os.OpenFile("lid.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	s.Name = serviceName;
-	s.Lid = lid
+	s.Logger = log.New(logFile, fmt.Sprintf("[%s] ", s.Name), log.Ldate|log.Ltime)
 	lid.services[serviceName] = s
 }
 
@@ -61,10 +62,15 @@ func (lid *Lid) Start(services []string) {
 
 		status := service.GetStatus()
 		if status == RUNNING {
-			log.Printf("Service '%s' is already running with PID %d\n", service.Name, service.GetPid())
+			log.Printf("%s: Running with PID %d\n", service.Name, service.GetPid())
 		} else {
-			log.Printf("Starting '%s' \n", service.Name)
-			lid.Fork("--start-service", service.Name)
+			log.Printf("%s: Starting \n", service.Name)
+			_, err := service.PrepareCommand()
+			if err != nil {
+				log.Printf("%v\n", err)
+			} else {
+				lid.Fork("--start-service", service.Name)
+			}
 		}
 	}
 }
@@ -78,8 +84,10 @@ func (lid *Lid) Stop(services []string) {
 		}
 
 		err := service.Stop()
-		if err == nil {
-			lid.Logger.Printf("Stop %s\n", service.Name)
+		if err != nil {
+			log.Printf("%s: %v\n", service.Name, err)
+		} else {
+			log.Printf("%s: Stopped\n", service.Name)
 		}
 	}
 }
@@ -97,7 +105,7 @@ func (lid *Lid) List() {
 		upTime := time.Now().UnixMilli() - createTime
 		cpu, _ := proc.CPUPercent()
 
-		log.Printf("%s	| RUNNING (%d mins) [%f%%]\n", service.Name, (upTime / 1000 / 60), cpu)
+		log.Printf("%s	| RUNNING (%d secs) [%f%%]\n", service.Name, (upTime / 1000), cpu)
 	}
 }
 
@@ -122,7 +130,11 @@ func (lid *Lid) Run() {
 		lid.List()
 	case "--start-service":
 		serviceName := os.Args[2]
-		lid.services[serviceName].Start()
+		lid.logger.Printf("Starting %s\n", serviceName)
+		err := lid.services[serviceName].Start()
+		if err != nil {
+			lid.logger.Printf("Could not start %s: %v\n", serviceName, err)
+		}
 	default:
 		// panic("Invalid usage")
 		panic(invalidUsage)
