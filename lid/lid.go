@@ -42,24 +42,41 @@ func (lid *Lid) Fork(args ...string) {
 	cmd.Process.Release()
 }
 
-
-func (lid *Lid) Start() {
-	for _, service := range lid.services {
-
-		proc, _ := service.GetProcess()
-		if proc != nil {
-			log.Printf("Service '%s' is already running with PID %d\n", service.Name, proc.Pid)
-			continue
-		}
-
-		log.Printf("Starting '%s' \n", service.Name)
-		lid.Fork("--start-service", service.Name)
-	}
-
+func Contains[T comparable](s []T, e T) bool {
+    for _, v := range s {
+        if v == e {
+            return true
+        }
+    }
+    return false
 }
 
-func (lid *Lid) Stop() {
+func (lid *Lid) Start(services []string) {
 	for _, service := range lid.services {
+		if len(services) > 0 {
+			if !Contains(services, service.Name) {
+				continue
+			}
+		}
+
+		status := service.GetStatus()
+		if status == RUNNING {
+			log.Printf("Service '%s' is already running with PID %d\n", service.Name, service.GetPid())
+		} else {
+			log.Printf("Starting '%s' \n", service.Name)
+			lid.Fork("--start-service", service.Name)
+		}
+	}
+}
+
+func (lid *Lid) Stop(services []string) {
+	for _, service := range lid.services {
+		if len(services) > 0 {
+			if !Contains(services, service.Name) {
+				continue
+			}
+		}
+
 		err := service.Stop()
 		if err == nil {
 			lid.Logger.Printf("Stop %s\n", service.Name)
@@ -69,9 +86,9 @@ func (lid *Lid) Stop() {
 
 func (lid *Lid) List() {
 	for _, service := range lid.services {
-		proc, _ := service.GetProcess()
+		proc, err := service.GetProcess()
 
-		if proc == nil {
+		if err != nil {
 			log.Printf("%s	| STOPPED\n", service.Name)
 			continue
 		}
@@ -93,12 +110,12 @@ func (lid *Lid) Run() {
 
 	switch os.Args[1] {
 	case "start":
-		lid.Start()
+		lid.Start(os.Args[2:])
 	case "stop":
-		lid.Stop()
+		lid.Stop(os.Args[2:])
 	case "restart":
-		lid.Stop()
-		lid.Start()
+		lid.Stop(os.Args[2:])
+		lid.Start(os.Args[2:])
 	case "ls":
 		fallthrough
 	case "list":

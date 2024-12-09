@@ -2,6 +2,7 @@ package lid_test
 
 import (
 	// "os"
+	"fmt"
 	"os/exec"
 	"path/filepath"
 	"sync"
@@ -10,8 +11,6 @@ import (
 
 	"github.com/robo-monk/lid/lid"
 	"github.com/stretchr/testify/assert"
-	// "github.com/shirou/gopsutil/v4/process"
-	// "github.com/yourusername/yourproject/lid"
 )
 
 // TestServiceProcessReadWrite tests writing and reading a ServiceProcess to/from a file.
@@ -222,6 +221,50 @@ func TestNewServiceOnExitDoesNotRunWhenStopped(t *testing.T) {
 	assert.Equal(t, lid.STOPPED, s.GetStatus(), "Process should be STOPPED, since we stopped the task manually")
 	assert.Equal(t, lid.NO_PID, s.GetPid(), "PID should be 0")
 
+	wg.Wait()
+
+	assert.Less(t, time.Now().UnixMilli()-start, int64(100), "Process should not be allowed to complete")
+	assert.Equal(t, recievedErrorCode, -1, "OnExit function should not have run")
+}
+
+func TestNewServiceStartStart(t *testing.T) {
+	m := lid.New();
+
+	recievedErrorCode := -1
+
+	s := lid.Service {
+		Lid:     m,
+		Name:    "test-process-2",
+		Command: []string{ "bash", "-c", "sleep 1; exit 32"},
+		OnExit: func(e *exec.ExitError, self *lid.Service) {
+			recievedErrorCode = e.ExitCode()
+		},
+	}
+
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+
+	go func(){
+		defer wg.Done()
+		s.Start()
+	}()
+
+	start := time.Now().UnixMilli()
+
+	// Wait for the task to start runnng
+	time.Sleep(10 * time.Millisecond)
+
+	assert.Equal(t, lid.RUNNING, s.GetStatus(), "Process should be RUNNING")
+	currentPid := s.GetPid()
+	assert.NotEqual(t, lid.NO_PID, currentPid, "PID should not be 0")
+
+	err := s.Start()
+
+	assert.ErrorIs(t, err, fmt.Errorf("Service 'test-process-2' is already running\n"))
+	assert.Equal(t, lid.RUNNING, s.GetStatus(), "Process should be still RUNNING")
+	assert.Equal(t, currentPid, s.GetPid(), "PID should be the same")
+	s.Stop()
 	wg.Wait()
 
 	assert.Less(t, time.Now().UnixMilli()-start, int64(100), "Process should not be allowed to complete")

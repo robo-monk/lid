@@ -94,20 +94,24 @@ func (s *Service) GetPid() int32 {
 	return s.getCachedProcessState().Pid
 }
 
-func (s *Service) Start() {
+func (s *Service) Start() error {
 
-	process, err := s.GetProcess()
-
-	if err == nil {
-		if running, _ := process.IsRunning(); running {
-			log.Fatalf("Service '%s' is already running\n", s.Name)
-		}
-
-		os.Remove(s.GetServiceProcessFilename())
+	if s.GetStatus() == RUNNING {
+		return fmt.Errorf("Service '%s' is already running\n", s.Name)
 	}
+	// process, err := s.GetProcess()
+
+	// if err == nil {
+	// 	if running, _ := process.IsRunning(); running {
+	// 		// log.Fatalf("Service '%s' is already running\n", s.Name)
+	// 	}
+
+	// 	os.Remove(s.GetServiceProcessFilename())
+	// }
 
 
 	fmt.Printf("Starting service %s\n", s.Name);
+	fmt.Printf("Current status is %d\n", s.GetStatus());
 
 	cmd := exec.Command(s.Command[0], s.Command[1:]...)
 
@@ -124,9 +128,9 @@ func (s *Service) Start() {
 
 
 	// Start the command in the background
-	err = cmd.Start()
+	err := cmd.Start()
 	if err != nil {
-		s.Lid.Logger.Fatalf("Failed to start command: %v", err)
+		return fmt.Errorf("Failed to start command: %v", err)
 	}
 
 	// Get the PID of the background process
@@ -139,12 +143,12 @@ func (s *Service) Start() {
 
 	err = cmd.Wait()
 
-	s.Lid.Logger.Printf("'%s' exited (%v)\n", s.Name, s.GetStatus())
+	s.Lid.Logger.Printf("'%s' exited\n", s.Name)
 
 	// s.GetStatus()
 	// check if we got stopped with ./lid stop
 
-	if s.GetStatus() != STOPPED {
+	if s.getCachedProcessState().Status != STOPPED {
 		s.WriteServiceProcess(ServiceProcess {
 			Status: EXITED,
 			Pid:	NO_PID,
@@ -156,6 +160,7 @@ func (s *Service) Start() {
 	};
 
 	s.Lid.Logger.Printf("Command exited with error: %v", err)
+	return nil
 }
 
 func (s *Service) Stop() error {
@@ -177,8 +182,12 @@ func (s *Service) Stop() error {
 }
 
 func (s *Service) GetStatus() ServiceStatus {
-	process := s.getCachedProcessState()
-	return process.Status
+	ps := s.getCachedProcessState()
+	exists, err := process.PidExists(ps.Pid)
+	if err != nil && !exists && ps.Status == RUNNING {
+		return STOPPED
+	}
+	return ps.Status
 }
 
 
