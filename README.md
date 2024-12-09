@@ -11,9 +11,35 @@ It aims to have:
 
 > young code use with care
 
-## Usage
-1. Create a `lid` directory in the root of your monorepo
-2. Create a `lid/lid.go`
+### Recommended Installation
+1.  Create a `lid` directory in the root of your monorepo
+2.  Create a `lid/lig.go` and register your services
+4.  `go mod tidy && go build -o lid`
+
+### CLI Usage
+
+```bash
+lid CLI
+
+Usage:
+  lid [command]
+
+Available commands:
+  start             	Starts all registered services
+  start <service>   	Starts a specific service
+  stop              	Stops all running services
+  stop <service>    	Stops a specific service
+  restart           	Restarts all services
+  restart <service> 	Restarts a specific service
+  list              	Lists the status of all services
+
+Available services:
+  - pocketbase
+  - backend
+  - frontend
+```
+
+### Example Configuration
 
 ```go
 package main
@@ -28,21 +54,32 @@ func main() {
     manager := lid.New()
 
     manager.Register("pocketbase", &lid.Service{
-        Cwd:     "../../../../convex/convex/pocketbase",
-        Command: []string{"./convex-pb", "serve"},
-        EnvFile: ".env",
-        OnExit: func(e *exec.ExitError, service *lid.Service) {
-           	service.Logger.Println("POCKETBASE FAILED")
+        Cwd:     	"../pocketbase",
+        Command: 	[]string{"./pocketbase", "serve"},
+        EnvFile: 	".env",
+        OnExit: 	func(e *exec.ExitError, service *lid.Service) {
+           	service.Logger.Println("pocketbase failed")
+
+            // ... log the error further
+
+            // Restart the service
            	service.Start()
         },
     })
 
+    manager.Register("backend", &lid.Service {
+    		Cwd: 			"../server"
+      	EnvFile:	".production.env"
+        Command: 	[]string{"./dist/server"},
+        OnExit: 	func(e *exec.ExitError, service *lid.Service) {
+           	service.Start()
+        },
+    })
 
-
-    manager.Register("test", &lid.Service{
-        Command: []string{"bash", "-c", "sleep 2; exit 1"},
-        OnExit: func(e *exec.ExitError, service *lid.Service) {
-           	service.Logger.Println("FAILED")
+    manager.Register("frontend", &lid.Service {
+      	Cwd: 			"../frontend"
+        Command: 	[]string{ "pnpm", "run", "start" },
+        OnExit: 	func(e *exec.ExitError, service *lid.Service) {
            	service.Start()
         },
     })
@@ -53,5 +90,5 @@ func main() {
 
 ### Run it as a service
 ```
-system-ctl enable --now cd <dir-with-lidfile> && lid start
+system-ctl enable --now path/to/lid/exe start
 ```
