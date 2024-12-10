@@ -2,6 +2,7 @@ package lid
 
 import (
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/exec"
@@ -35,7 +36,7 @@ func (lid *Lid) Register(serviceName string, s *Service) {
 
 	logFile, _ := os.OpenFile("lid.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	s.Name = serviceName
-	s.Logger = log.New(logFile, fmt.Sprintf("[%s] ", s.Name), log.Ldate|log.Ltime)
+	s.Logger = log.New(io.MultiWriter(os.Stdout, logFile), fmt.Sprintf("[%s] ", s.Name), log.Ldate|log.Ltime)
 	lid.services[serviceName] = s
 }
 
@@ -66,14 +67,14 @@ func (lid *Lid) Start(services []string) {
 			}
 		}
 
-		status := service.GetStatus()
-		if status == RUNNING {
-			log.Printf("%s: Running with PID %d\n", service.Name, service.GetPid())
+		proc, err := service.GetRunningProcess()
+		if err == nil {
+			log.Printf("%s: Running with PID %d\n", service.Name, proc.Pid)
 		} else {
 			log.Printf("%s: Starting \n", service.Name)
 			_, err := service.PrepareCommand()
 			if err != nil {
-				log.Printf("%v\n", err)
+				log.Printf("%s: %v\n", service.Name, err)
 			} else {
 				lid.Fork("spawn", service.Name)
 			}
@@ -113,7 +114,7 @@ func (lid *Lid) List() {
 	// for _, service := range lid.services {
 	for _, serviceName := range keys {
 		service := lid.services[serviceName]
-		proc, err := service.GetProcess()
+		proc, err := service.GetRunningProcess()
 
 		if err != nil {
 			t.AddRow(service.Name, "\033[31mStopped\033[0m", "0", "-", "-")
@@ -189,6 +190,7 @@ func (lid *Lid) Run() {
 		lid.List()
 	case "spawn":
 		serviceName := os.Args[2]
+		log.Printf("Spawning '%s'\n", serviceName)
 		lid.logger.Printf("Starting %s\n", serviceName)
 		err := lid.services[serviceName].Start()
 		if err != nil {

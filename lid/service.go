@@ -88,9 +88,36 @@ func (s *Service) WriteServiceProcess(sp ServiceProcess) error {
 	return sp.WriteToFile(s.GetServiceProcessFilename())
 }
 
-func (s *Service) GetProcess() (*process.Process, error) {
-	proc := s.getCachedProcessState()
-	return process.NewProcess(int32(proc.Pid))
+func (s *Service) GetRunningProcess() (*process.Process, error) {
+	state := s.getCachedProcessState()
+	proc, err := process.NewProcess(int32(state.Pid))
+
+	if err != nil {
+		return nil, err
+	}
+
+	running, err := proc.IsRunning()
+
+	if !running || err != nil {
+		return nil, err
+	}
+
+	return proc, nil
+}
+
+func (s *Service) IsRunning() bool {
+	proc, err := s.GetRunningProcess()
+	if err != nil {
+		return false
+	}
+
+	isRunning, err := proc.IsRunning()
+
+	if err != nil {
+		return false
+	}
+
+	return isRunning
 }
 
 func (s *Service) GetPid() int32 {
@@ -98,7 +125,8 @@ func (s *Service) GetPid() int32 {
 }
 
 func (s *Service) PrepareCommand() (*exec.Cmd, error) {
-	if s.GetStatus() == RUNNING {
+
+	if s.IsRunning() {
 		return nil, ErrProcessAlreadyRunning
 	}
 
@@ -119,8 +147,17 @@ func (s *Service) PrepareCommand() (*exec.Cmd, error) {
 		cmd.Env = append(cmd.Env, userDefinedEnv...)
 	}
 
-	cmd.Stderr = io.MultiWriter(os.Stderr, s.Stderr)
-	cmd.Stdout = io.MultiWriter(os.Stdout, s.Stdout)
+	if s.Stderr != nil {
+		cmd.Stderr = s.Stderr
+	} else {
+		cmd.Stderr = os.Stderr
+	}
+
+	if s.Stdout != nil {
+		cmd.Stdout = s.Stdout
+	} else {
+		cmd.Stdout = os.Stdout
+	}
 
 	return cmd, nil
 }
@@ -146,15 +183,15 @@ func (s *Service) Start() error {
 	err = cmd.Start()
 
 	if err != nil {
-		ferr := fmt.Errorf("failed to start command: %v", err)
-		s.Logger.Printf("%v\n", ferr)
-		return ferr
+		err := fmt.Errorf("failed to start command: %v", err)
+		s.Logger.Printf("%v\n", err)
+		return err
 	}
 
 	// Get the PID of the background process
 	s.Logger.Printf("Started with PID: %d", cmd.Process.Pid)
 
-	s.WriteServiceProcess(ServiceProcess{
+	s.WriteServiceProcess(ServiceProcess {
 		Status: RUNNING,
 		Pid:    int32(cmd.Process.Pid),
 	})
@@ -187,7 +224,7 @@ func (s *Service) Start() error {
 }
 
 func (s *Service) Stop() error {
-	process, err := s.GetProcess()
+	process, err := s.GetRunningProcess()
 	if err != nil {
 		return fmt.Errorf("Service already down")
 	}
@@ -203,12 +240,8 @@ func (s *Service) Stop() error {
 	return nil
 }
 
-func (s *Service) GetStatus() ServiceStatus {
+func (s *Service) GetCachedStatus() ServiceStatus {
 	ps := s.getCachedProcessState()
-	exists, err := process.PidExists(ps.Pid)
-	if err != nil && !exists && ps.Status == RUNNING {
-		return STOPPED
-	}
 	return ps.Status
 }
 

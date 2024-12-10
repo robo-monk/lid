@@ -76,7 +76,7 @@ func TestNewService(t *testing.T) {
 		// EnvFile: "",
 	}
 
-	assert.True(t, s.GetStatus() == lid.STOPPED || s.GetStatus() == lid.EXITED, s.GetStatus())
+	assert.True(t, s.GetCachedStatus() == lid.STOPPED || s.GetCachedStatus() == lid.EXITED, s.GetCachedStatus())
 	assert.Equal(t, lid.NO_PID, s.GetPid())
 }
 
@@ -89,7 +89,7 @@ func TestNewServiceStart(t *testing.T) {
 		// EnvFile: "",
 	}
 
-	assert.True(t, s.GetStatus() == lid.STOPPED || s.GetStatus() == lid.EXITED, s.GetStatus())
+	assert.True(t, s.GetCachedStatus() == lid.STOPPED || s.GetCachedStatus() == lid.EXITED, s.GetCachedStatus())
 	assert.Equal(t, lid.NO_PID, s.GetPid())
 
 	var wg sync.WaitGroup
@@ -104,13 +104,13 @@ func TestNewServiceStart(t *testing.T) {
 	time.Sleep(10 * time.Millisecond)
 
 	// Task should be running right now
-	assert.Equal(t, lid.RUNNING, s.GetStatus(), "Process should be RUNNING")
+	assert.Equal(t, lid.RUNNING, s.GetCachedStatus(), "Process should be RUNNING")
 	assert.NotEqual(t, lid.NO_PID, s.GetPid(), "PID should not be 0")
 
 	wg.Wait()
 
 	// Task should be done
-	assert.Equal(t, lid.EXITED, s.GetStatus(), "Process should be exited")
+	assert.Equal(t, lid.EXITED, s.GetCachedStatus(), "Process should be exited")
 	assert.Equal(t, lid.NO_PID, s.GetPid(), "PID should be 0")
 }
 
@@ -121,7 +121,7 @@ func TestNewServiceStartStop(t *testing.T) {
 		Command: []string{"bash", "-c", "sleep 5; exit 0"},
 	}
 
-	assert.True(t, s.GetStatus() == lid.STOPPED || s.GetStatus() == lid.EXITED, s.GetStatus())
+	assert.True(t, s.GetCachedStatus() == lid.STOPPED || s.GetCachedStatus() == lid.EXITED, s.GetCachedStatus())
 	assert.Equal(t, lid.NO_PID, s.GetPid())
 
 	var wg sync.WaitGroup
@@ -137,18 +137,18 @@ func TestNewServiceStartStop(t *testing.T) {
 	time.Sleep(10 * time.Millisecond)
 
 	// Task should be running right now
-	assert.Equal(t, lid.RUNNING, s.GetStatus(), "Process should be RUNNING")
+	assert.Equal(t, lid.RUNNING, s.GetCachedStatus(), "Process should be RUNNING")
 	assert.NotEqual(t, lid.NO_PID, s.GetPid(), "PID should not be 0")
 
 	s.Stop()
 
-	assert.Equal(t, lid.STOPPED, s.GetStatus(), "Process should be STOPPED, since we stopped the task manually")
+	assert.Equal(t, lid.STOPPED, s.GetCachedStatus(), "Process should be STOPPED, since we stopped the task manually")
 	assert.Equal(t, lid.NO_PID, s.GetPid(), "PID should be 0")
 
 	wg.Wait()
 
 	assert.Less(t, time.Now().UnixMilli()-start, int64(100), "Process should not be allowed to complete")
-	assert.Equal(t, lid.STOPPED, s.GetStatus(), "Process should be STOPPED")
+	assert.Equal(t, lid.STOPPED, s.GetCachedStatus(), "Process should be STOPPED")
 	assert.Equal(t, lid.NO_PID, s.GetPid(), "PID should be 0")
 }
 
@@ -164,12 +164,12 @@ func TestNewServiceOnExit(t *testing.T) {
 		},
 	}
 
-	assert.True(t, s.GetStatus() == lid.STOPPED || s.GetStatus() == lid.EXITED, s.GetStatus())
+	assert.True(t, s.GetCachedStatus() == lid.STOPPED || s.GetCachedStatus() == lid.EXITED, s.GetCachedStatus())
 	assert.Equal(t, lid.NO_PID, s.GetPid())
 	s.Start()
 
 	// Task should be running right now
-	assert.Equal(t, lid.EXITED, s.GetStatus(), "Process should be EXITED")
+	assert.Equal(t, lid.EXITED, s.GetCachedStatus(), "Process should be EXITED")
 	assert.Equal(t, recievedErrorCode, 32, "Exit codes do not match")
 }
 
@@ -198,12 +198,12 @@ func TestNewServiceOnExitDoesNotRunWhenStopped(t *testing.T) {
 	// Wait for the task to start runnng
 	time.Sleep(10 * time.Millisecond)
 
-	assert.Equal(t, lid.RUNNING, s.GetStatus(), "Process should be RUNNING")
+	assert.Equal(t, lid.RUNNING, s.GetCachedStatus(), "Process should be RUNNING")
 	assert.NotEqual(t, lid.NO_PID, s.GetPid(), "PID should not be 0")
 
 	s.Stop()
 
-	assert.Equal(t, lid.STOPPED, s.GetStatus(), "Process should be STOPPED, since we stopped the task manually")
+	assert.Equal(t, lid.STOPPED, s.GetCachedStatus(), "Process should be STOPPED, since we stopped the task manually")
 	assert.Equal(t, lid.NO_PID, s.GetPid(), "PID should be 0")
 
 	wg.Wait()
@@ -238,7 +238,7 @@ func TestNewServiceStartStart(t *testing.T) {
 	// Wait for the task to start runnng
 	time.Sleep(10 * time.Millisecond)
 
-	assert.Equal(t, lid.RUNNING, s.GetStatus(), "Process should be RUNNING")
+	assert.Equal(t, lid.RUNNING, s.GetCachedStatus(), "Process should be RUNNING")
 	currentPid := s.GetPid()
 	assert.NotEqual(t, lid.NO_PID, currentPid, "PID should not be 0")
 
@@ -247,7 +247,7 @@ func TestNewServiceStartStart(t *testing.T) {
 	// assert.NotNil(t, err)
 	// assert.Equal(t, err.Error(), "service 'test-process' is already running")
 	assert.ErrorIs(t, err, lid.ErrProcessAlreadyRunning)
-	assert.Equal(t, lid.RUNNING, s.GetStatus(), "Process should be still RUNNING")
+	assert.Equal(t, lid.RUNNING, s.GetCachedStatus(), "Process should be still RUNNING")
 	assert.Equal(t, currentPid, s.GetPid(), "PID should be the same")
 	s.Stop()
 	wg.Wait()
@@ -278,7 +278,7 @@ func TestOnBeforeStart(t *testing.T) {
 	assert.NotNil(t, err)
 	assert.Equal(t, "preventing start", err.Error())
 	assert.True(t, beforeStartCalled)
-	assert.True(t, s.GetStatus() == lid.STOPPED || s.GetStatus() == lid.EXITED)
+	assert.True(t, s.GetCachedStatus() == lid.STOPPED || s.GetCachedStatus() == lid.EXITED)
 	assert.Equal(t, lid.NO_PID, s.GetPid())
 
 	// Reset and allow start
@@ -296,7 +296,7 @@ func TestOnBeforeStart(t *testing.T) {
 
 	time.Sleep(10 * time.Millisecond)
 	assert.True(t, beforeStartCalled)
-	assert.Equal(t, lid.RUNNING, s.GetStatus())
+	assert.Equal(t, lid.RUNNING, s.GetCachedStatus())
 	assert.NotEqual(t, lid.NO_PID, s.GetPid())
 
 	s.Stop()
@@ -328,7 +328,7 @@ func TestOnAfterStart(t *testing.T) {
 
 	time.Sleep(10 * time.Millisecond)
 	assert.True(t, afterStartCalled)
-	assert.Equal(t, lid.RUNNING, s.GetStatus())
+	assert.Equal(t, lid.RUNNING, s.GetCachedStatus())
 	assert.NotEqual(t, lid.NO_PID, capturedPid)
 	assert.Equal(t, capturedPid, s.GetPid())
 
