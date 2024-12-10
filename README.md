@@ -1,22 +1,20 @@
 # lid
 
-Lid is a very simple process manager written in Go. It is a lightweight alternative to pm2 and forever.
-It is inspired by the fantastic DX of [Pocketbase](https://pocketbase.io/) and follows similar patterns.
+Lid is a very simple process manager inspired by pocketbase and pm2.
+I use it in a monorepo to orchestrate various processes in production.
 
 It aims to have:
-- **No Background Daemon**
-- **Simple Interface**
-- **Configurable Behavior**
-- **Zero Downtime**
-- **Agnostic Process Support**
+- No background deamon
+- Very simple interface
+- Callbacks when processes exit
+- Zero(ish?) downtime when restarting applications
 
-> This project is in alpha. Use with caution.
+> young code use with care
 
 ### Recommended Installation
 1.  Create a `lid` directory in the root of your monorepo
-2.  Create a `lid/lid.go` and register your services
-3.  `go mod init lid && go mod tidy && go build -o lid`
-4.  Add `lid/lid.log` and `lid/lid` to `.gitignore`
+2.  Create a `lid/lig.go` and register your services
+3. `go mod init lig && go mod tidy && go build -o lid`
 
 ### CLI Usage
 
@@ -36,9 +34,7 @@ Available commands:
   list              	Lists the status of all services
 
 Available services:
-  - pocketbase
-  - backend
-  - frontend
+    ...
 ```
 
 ### Example Configuration
@@ -56,30 +52,38 @@ func main() {
     manager := lid.New()
 
     manager.Register("pocketbase", &lid.Service{
-        Cwd:      "../pocketbase",
-        Command:  []string{"./pocketbase", "serve"},
-        EnvFile:  ".env",
-        OnExit:   func(e *exec.ExitError, service *lid.Service) {
-		service.Logger.Println("pocketbase failed")
-            	// ... log the error further
-            	// Restart the service
+    		// the cwd is ALWAYS relative to the executable
+        Cwd:     	"../pocketbase",
+        Command: 	[]string{"./pocketbase", "serve"},
+
+       	// Env file relative to Cwd
+        EnvFile: 	".env",
+        OnExit: 	func(e *exec.ExitError, service *lid.Service) {
+           	service.Logger.Println("pocketbase failed")
+
+            // ... log the error further
+
+            // Restart the service
            	service.Start()
         },
     })
 
     manager.Register("backend", &lid.Service {
-        Cwd: 	 "../server"
-      	EnvFile: ".production.env"
-        Command: []string{"./dist/server"},
-        OnExit:  func(e *exec.ExitError, service *lid.Service) {
+ 				// the cwd is ALWAYS relative to the executable
+    		Cwd: 			"../server",
+      	// Env file relative to Cwd
+      	EnvFile:	".production.env",
+        Command: 	[]string{"./dist/server"},
+        OnExit: 	func(e *exec.ExitError, service *lid.Service) {
            	service.Start()
         },
     })
 
     manager.Register("frontend", &lid.Service {
-      	Cwd: 	 "../frontend"
-        Command: []string{ "pnpm", "run", "start" },
-        OnExit:  func(e *exec.ExitError, service *lid.Service) {
+  			// the cwd is ALWAYS relative to the executable
+      	Cwd: 			"../frontend",
+        Command: 	[]string{ "pnpm", "run", "start" },
+        OnExit: 	func(e *exec.ExitError, service *lid.Service) {
            	service.Start()
         },
     })

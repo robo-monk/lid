@@ -62,7 +62,6 @@ type Service struct {
 	Command []string
 	EnvFile	string
 
-	// OnStop 	func(e *exec.ExitError, self *Service)
 	OnExit 	func(e *exec.ExitError, self *Service)
 }
 
@@ -102,12 +101,13 @@ func (s *Service) PrepareCommand() (*exec.Cmd, error) {
 	cmd := exec.Command(s.Command[0], s.Command[1:]...)
 
 	if s.Cwd != "" {
-		cmd.Dir, _ = filepath.Abs(s.Cwd)
+		cmd.Dir, _ = getRelativePath(s.Cwd)
 	}
 
 	if s.EnvFile != "" {
 		var ferr error
-		cmd.Env, ferr = ReadDotEnvFile(filepath.Join(s.Cwd, s.EnvFile))
+		envPath, _ := getRelativePath(filepath.Join(s.Cwd, s.EnvFile))
+		cmd.Env, ferr = ReadDotEnvFile(envPath)
 		if ferr != nil{
 			return nil, ferr
 		}
