@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/exec"
@@ -15,6 +16,7 @@ import (
 const NO_PID int32 = 0
 
 type ServiceStatus int8
+
 const (
 	STOPPED ServiceStatus = iota
 	EXITED
@@ -22,12 +24,10 @@ const (
 	RUNNING
 )
 
-
 type ServiceProcess struct {
-	Status 	ServiceStatus
-	Pid		int32
+	Status ServiceStatus
+	Pid    int32
 }
-
 
 func (sp ServiceProcess) WriteToFile(filename string) error {
 	buf := new(bytes.Buffer)
@@ -53,16 +53,20 @@ func ReadServiceProcess(filename string) (ServiceProcess, error) {
 	return data, err
 }
 
-
 type Service struct {
-	Logger  *log.Logger
-	Name 	string
-	Cwd		string
+	Logger *log.Logger
+	Name   string
+	Cwd    string
 
 	Command []string
-	EnvFile	string
+	EnvFile string
 
-	OnExit 	func(e *exec.ExitError, self *Service)
+	OnBeforeStart func(self *Service) error
+	OnAfterStart  func(self *Service)
+	OnExit        func(e *exec.ExitError, self *Service)
+
+	Stdout io.Writer
+	Stderr io.Writer
 }
 
 func (s *Service) GetServiceProcessFilename() string {
@@ -72,8 +76,8 @@ func (s *Service) GetServiceProcessFilename() string {
 func (s *Service) getCachedProcessState() ServiceProcess {
 	sp, error := ReadServiceProcess(s.GetServiceProcessFilename())
 	if error != nil {
-		return ServiceProcess {
-			Pid: NO_PID,
+		return ServiceProcess{
+			Pid:    NO_PID,
 			Status: STOPPED,
 		}
 	}
@@ -86,7 +90,7 @@ func (s *Service) WriteServiceProcess(sp ServiceProcess) error {
 
 func (s *Service) GetProcess() (*process.Process, error) {
 	proc := s.getCachedProcessState()
-	return  process.NewProcess(int32(proc.Pid))
+	return process.NewProcess(int32(proc.Pid))
 }
 
 func (s *Service) GetPid() int32 {
@@ -95,7 +99,7 @@ func (s *Service) GetPid() int32 {
 
 func (s *Service) PrepareCommand() (*exec.Cmd, error) {
 	if s.GetStatus() == RUNNING {
-		return nil, fmt.Errorf("Service '%s' is already running\n", s.Name)
+		return nil, ErrProcessAlreadyRunning
 	}
 
 	cmd := exec.Command(s.Command[0], s.Command[1:]...)
@@ -115,8 +119,8 @@ func (s *Service) PrepareCommand() (*exec.Cmd, error) {
 		cmd.Env = append(cmd.Env, userDefinedEnv...)
 	}
 
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	cmd.Stderr = io.MultiWriter(os.Stderr, s.Stderr)
+	cmd.Stdout = io.MultiWriter(os.Stdout, s.Stdout)
 
 	return cmd, nil
 }
@@ -125,26 +129,39 @@ func (s *Service) Start() error {
 
 	cmd, err := s.PrepareCommand()
 	if err != nil {
-		s.Logger.Printf("%v\n", err);
+		s.Logger.Printf("%v\n", err)
 		return err
 	}
 
-	s.Logger.Printf("Command: %v\n", cmd);
+	s.Logger.Printf("Command: %v\n", cmd)
+
+	if s.OnBeforeStart != nil {
+		err := s.OnBeforeStart(s)
+		if err != nil {
+			s.Logger.Printf("rejected start: %v\n", err)
+			return err
+		}
+	}
 
 	err = cmd.Start()
+
 	if err != nil {
-		ferr := fmt.Errorf("Failed to start command: %v", err)
-		s.Logger.Printf("%v\n", ferr);
+		ferr := fmt.Errorf("failed to start command: %v", err)
+		s.Logger.Printf("%v\n", ferr)
 		return ferr
 	}
 
 	// Get the PID of the background process
 	s.Logger.Printf("Started with PID: %d", cmd.Process.Pid)
 
-	s.WriteServiceProcess(ServiceProcess {
+	s.WriteServiceProcess(ServiceProcess{
 		Status: RUNNING,
-		Pid: 	int32(cmd.Process.Pid),
+		Pid:    int32(cmd.Process.Pid),
 	})
+
+	if s.OnAfterStart != nil {
+		s.OnAfterStart(s)
+	}
 
 	err = cmd.Wait()
 
@@ -154,9 +171,9 @@ func (s *Service) Start() error {
 
 	if s.getCachedProcessState().Status != STOPPED {
 		s.Logger.Println("Exited")
-		s.WriteServiceProcess(ServiceProcess {
+		s.WriteServiceProcess(ServiceProcess{
 			Status: EXITED,
-			Pid:	NO_PID,
+			Pid:    NO_PID,
 		})
 
 		if s.OnExit != nil {
@@ -177,7 +194,7 @@ func (s *Service) Stop() error {
 
 	s.Logger.Println("Stopping service")
 
-	s.WriteServiceProcess(ServiceProcess {
+	s.WriteServiceProcess(ServiceProcess{
 		Status: STOPPED,
 		Pid:    NO_PID,
 	})
@@ -194,7 +211,6 @@ func (s *Service) GetStatus() ServiceStatus {
 	}
 	return ps.Status
 }
-
 
 func recursiveKill(p *process.Process) {
 	children, _ := p.Children()

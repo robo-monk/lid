@@ -5,14 +5,15 @@ import (
 	"log"
 	"os"
 	"os/exec"
-	"time"
 	"sort"
+	"time"
+
 	"github.com/aquasecurity/table"
 )
 
 type Lid struct {
 	services map[string]*Service
-	logger *log.Logger
+	logger   *log.Logger
 }
 
 func New() *Lid {
@@ -21,8 +22,8 @@ func New() *Lid {
 		log.Fatalf("Failed to open log file: %v", err)
 	}
 
-	return &Lid {
-		logger: log.New(logFile, "", log.Ldate|log.Ltime),
+	return &Lid{
+		logger:   log.New(logFile, "", log.Ldate|log.Ltime),
 		services: make(map[string]*Service),
 	}
 }
@@ -33,15 +34,14 @@ func (lid *Lid) Register(serviceName string, s *Service) {
 	}
 
 	logFile, _ := os.OpenFile("lid.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	s.Name = serviceName;
+	s.Name = serviceName
 	s.Logger = log.New(logFile, fmt.Sprintf("[%s] ", s.Name), log.Ldate|log.Ltime)
 	lid.services[serviceName] = s
 }
 
-
 func (lid *Lid) Fork(args ...string) {
 	// exe
-	executablePath, _ := os.Executable();
+	executablePath, _ := os.Executable()
 	cmd := exec.Command(executablePath, args...)
 
 	// fork
@@ -50,12 +50,12 @@ func (lid *Lid) Fork(args ...string) {
 }
 
 func Contains[T comparable](s []T, e T) bool {
-    for _, v := range s {
-        if v == e {
-            return true
-        }
-    }
-    return false
+	for _, v := range s {
+		if v == e {
+			return true
+		}
+	}
+	return false
 }
 
 func (lid *Lid) Start(services []string) {
@@ -101,7 +101,7 @@ func (lid *Lid) Stop(services []string) {
 func (lid *Lid) List() {
 	t := table.New(os.Stdout)
 
-	t.SetHeaders("Name", "Status", "Uptime", "CPU", "Memory")
+	t.SetHeaders("Name", "Status", "Uptime", "PID", "CPU", "Memory")
 
 	// t.AddRow("1", "Apple", "14")
 	//
@@ -116,8 +116,7 @@ func (lid *Lid) List() {
 		proc, err := service.GetProcess()
 
 		if err != nil {
-			// log.Printf("%s	| STOPPED\n", service.Name)
-			t.AddRow(service.Name, "Stopped", "0", "-", "-")
+			t.AddRow(service.Name, "\033[31mStopped\033[0m", "0", "-", "-")
 			continue
 		}
 
@@ -125,13 +124,15 @@ func (lid *Lid) List() {
 		upTime := time.Now().UnixMilli() - createTime
 		cpu, _ := proc.CPUPercent()
 		mem, _ := proc.MemoryInfo()
+		pid := proc.Pid
 
 		t.AddRow(
 			service.Name,
-			fmt.Sprintf("Running"),
-			fmt.Sprintf("%ds", upTime / 1000 ),
+			"\033[32mRunning\033[0m",
+			fmt.Sprintf("%ds", upTime/1000),
+			fmt.Sprintf("%d", pid),
 			fmt.Sprintf("%f%%", cpu),
-			fmt.Sprintf("%dMB", mem.RSS / 1000000),
+			fmt.Sprintf("%dMB", mem.RSS/1000000),
 		)
 	}
 

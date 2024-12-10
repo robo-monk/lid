@@ -19,8 +19,6 @@ func main() {
         },
     })
 
-
-
     manager.Register("test-recur", &lid.Service{
         Command: []string{"bash", "-c", "sleep 2; exit 1"},
         OnExit: func(e *exec.ExitError, service *lid.Service) {

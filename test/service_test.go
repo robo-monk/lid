@@ -1,6 +1,7 @@
 package lid_test
 
 import (
+	"fmt"
 	"log"
 	"os"
 	"os/exec"
@@ -48,7 +49,6 @@ func TestReadServiceProcessFileNotFound(t *testing.T) {
 	assert.NotNil(t, err, "Expected error not to be nil")
 }
 
-
 // TestReadServiceProcessCorruptFile tests error handling with invalid binary data.
 // func TestReadServiceProcessCorruptFile(t *testing.T) {
 // 	t.Parallel()
@@ -66,15 +66,13 @@ func TestReadServiceProcessFileNotFound(t *testing.T) {
 // 	assert.Nil(t, err, "Expected error to be nil")
 // }
 
-
-
 func TestNewService(t *testing.T) {
 	// t.Parallel()
-	s := lid.Service {
- 		Logger:	log.New(os.Stdout, "[TEST] ", 0),
-		Name:    "test-process",
+	s := lid.Service{
+		Logger: log.New(os.Stdout, "[TEST] ", 0),
+		Name:   "test-process",
 		// Cwd:     "",
-		Command: []string{ "bash", "-c", "sleep 1; exit 1"},
+		Command: []string{"bash", "-c", "sleep 1; exit 1"},
 		// EnvFile: "",
 	}
 
@@ -83,22 +81,21 @@ func TestNewService(t *testing.T) {
 }
 
 func TestNewServiceStart(t *testing.T) {
-	s := lid.Service {
-		Logger:	log.New(os.Stdout, "[TEST] ", 0),
-		Name:    "test-process",
+	s := lid.Service{
+		Logger: log.New(os.Stdout, "[TEST] ", 0),
+		Name:   "test-process",
 		// Cwd:     "",
-		Command: []string{ "bash", "-c", "sleep 0.1; exit 1"},
+		Command: []string{"bash", "-c", "sleep 0.1; exit 1"},
 		// EnvFile: "",
 	}
 
 	assert.True(t, s.GetStatus() == lid.STOPPED || s.GetStatus() == lid.EXITED, s.GetStatus())
 	assert.Equal(t, lid.NO_PID, s.GetPid())
 
-
 	var wg sync.WaitGroup
 	wg.Add(1)
 
-	go func(){
+	go func() {
 		defer wg.Done()
 		s.Start()
 	}()
@@ -118,20 +115,19 @@ func TestNewServiceStart(t *testing.T) {
 }
 
 func TestNewServiceStartStop(t *testing.T) {
-	s := lid.Service {
-		Logger:	log.New(os.Stdout, "[TEST] ", 0),
+	s := lid.Service{
+		Logger:  log.New(os.Stdout, "[TEST] ", 0),
 		Name:    "test-process",
-		Command: []string{ "bash", "-c", "sleep 5; exit 0"},
+		Command: []string{"bash", "-c", "sleep 5; exit 0"},
 	}
 
 	assert.True(t, s.GetStatus() == lid.STOPPED || s.GetStatus() == lid.EXITED, s.GetStatus())
 	assert.Equal(t, lid.NO_PID, s.GetPid())
 
-
 	var wg sync.WaitGroup
 	wg.Add(1)
 
-	go func(){
+	go func() {
 		defer wg.Done()
 		s.Start()
 	}()
@@ -159,10 +155,10 @@ func TestNewServiceStartStop(t *testing.T) {
 func TestNewServiceOnExit(t *testing.T) {
 	recievedErrorCode := -1
 
-	s := lid.Service {
-		Logger:	log.New(os.Stdout, "[TEST] ", 0),
+	s := lid.Service{
+		Logger:  log.New(os.Stdout, "[TEST] ", 0),
 		Name:    "test-process",
-		Command: []string{ "bash", "-c", "sleep 0; exit 32"},
+		Command: []string{"bash", "-c", "sleep 0; exit 32"},
 		OnExit: func(e *exec.ExitError, self *lid.Service) {
 			recievedErrorCode = e.ExitCode()
 		},
@@ -180,20 +176,19 @@ func TestNewServiceOnExit(t *testing.T) {
 func TestNewServiceOnExitDoesNotRunWhenStopped(t *testing.T) {
 	recievedErrorCode := -1
 
-	s := lid.Service {
-		Logger:	log.New(os.Stdout, "[TEST] ", 0),
+	s := lid.Service{
+		Logger:  log.New(os.Stdout, "[TEST] ", 0),
 		Name:    "test-process",
-		Command: []string{ "bash", "-c", "sleep 5; exit 32"},
+		Command: []string{"bash", "-c", "sleep 5; exit 32"},
 		OnExit: func(e *exec.ExitError, self *lid.Service) {
 			recievedErrorCode = e.ExitCode()
 		},
 	}
 
-
 	var wg sync.WaitGroup
 	wg.Add(1)
 
-	go func(){
+	go func() {
 		defer wg.Done()
 		s.Start()
 	}()
@@ -220,20 +215,19 @@ func TestNewServiceOnExitDoesNotRunWhenStopped(t *testing.T) {
 func TestNewServiceStartStart(t *testing.T) {
 	recievedErrorCode := -1
 
-	s := lid.Service {
-		Logger:	log.New(os.Stdout, "[TEST] ", 0),
+	s := lid.Service{
+		Logger:  log.New(os.Stdout, "[TEST] ", 0),
 		Name:    "test-process",
-		Command: []string{ "bash", "-c", "sleep 1; exit 32"},
+		Command: []string{"bash", "-c", "sleep 1; exit 32"},
 		OnExit: func(e *exec.ExitError, self *lid.Service) {
 			recievedErrorCode = e.ExitCode()
 		},
 	}
 
-
 	var wg sync.WaitGroup
 	wg.Add(1)
 
-	go func(){
+	go func() {
 		defer wg.Done()
 		err := s.Start()
 		assert.Nil(t, err)
@@ -250,8 +244,9 @@ func TestNewServiceStartStart(t *testing.T) {
 
 	err := s.Start()
 
-	assert.NotNil(t, err)
-	assert.Equal(t, err.Error(), "Service 'test-process' is already running\n")
+	// assert.NotNil(t, err)
+	// assert.Equal(t, err.Error(), "service 'test-process' is already running")
+	assert.ErrorIs(t, err, lid.ErrProcessAlreadyRunning)
 	assert.Equal(t, lid.RUNNING, s.GetStatus(), "Process should be still RUNNING")
 	assert.Equal(t, currentPid, s.GetPid(), "PID should be the same")
 	s.Stop()
@@ -259,4 +254,84 @@ func TestNewServiceStartStart(t *testing.T) {
 
 	assert.Less(t, time.Now().UnixMilli()-start, int64(100), "Process should not be allowed to complete")
 	assert.Equal(t, recievedErrorCode, -1, "OnExit function should not have run")
+}
+
+func TestOnBeforeStart(t *testing.T) {
+	beforeStartCalled := false
+	shouldPreventStart := true
+
+	s := lid.Service{
+		Logger:  log.New(os.Stdout, "[TEST] ", 0),
+		Name:    "test-process",
+		Command: []string{"bash", "-c", "sleep 0.1; exit 0"},
+		OnBeforeStart: func(self *lid.Service) error {
+			beforeStartCalled = true
+			if shouldPreventStart {
+				return fmt.Errorf("preventing start")
+			}
+			return nil
+		},
+	}
+
+	// First attempt - OnBeforeStart should prevent service from starting
+	err := s.Start()
+	assert.NotNil(t, err)
+	assert.Equal(t, "preventing start", err.Error())
+	assert.True(t, beforeStartCalled)
+	assert.True(t, s.GetStatus() == lid.STOPPED || s.GetStatus() == lid.EXITED)
+	assert.Equal(t, lid.NO_PID, s.GetPid())
+
+	// Reset and allow start
+	beforeStartCalled = false
+	shouldPreventStart = false
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+
+	go func() {
+		defer wg.Done()
+		err := s.Start()
+		assert.Nil(t, err)
+	}()
+
+	time.Sleep(10 * time.Millisecond)
+	assert.True(t, beforeStartCalled)
+	assert.Equal(t, lid.RUNNING, s.GetStatus())
+	assert.NotEqual(t, lid.NO_PID, s.GetPid())
+
+	s.Stop()
+	wg.Wait()
+}
+
+func TestOnAfterStart(t *testing.T) {
+	afterStartCalled := false
+	var capturedPid int32
+
+	s := lid.Service{
+		Logger:  log.New(os.Stdout, "[TEST] ", 0),
+		Name:    "test-process",
+		Command: []string{"bash", "-c", "sleep 0.1; exit 0"},
+		OnAfterStart: func(self *lid.Service) {
+			afterStartCalled = true
+			capturedPid = self.GetPid()
+		},
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+
+	go func() {
+		defer wg.Done()
+		err := s.Start()
+		assert.Nil(t, err)
+	}()
+
+	time.Sleep(10 * time.Millisecond)
+	assert.True(t, afterStartCalled)
+	assert.Equal(t, lid.RUNNING, s.GetStatus())
+	assert.NotEqual(t, lid.NO_PID, capturedPid)
+	assert.Equal(t, capturedPid, s.GetPid())
+
+	s.Stop()
+	wg.Wait()
 }
