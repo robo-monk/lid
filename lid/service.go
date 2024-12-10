@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"time"
 
 	"github.com/shirou/gopsutil/v4/process"
 )
@@ -235,13 +236,54 @@ func (s *Service) Stop() error {
 		Pid:    NO_PID,
 	})
 
-	recursiveKill(process)
+	errors := recursiveTerminate(process)
+
+	if len(errors) > 0 {
+		return fmt.Errorf("failed to terminate service: %v", errors)
+	}
+
 	return nil
 }
 
 func (s *Service) GetCachedStatus() ServiceStatus {
 	ps := s.getCachedProcessState()
 	return ps.Status
+}
+
+func recursiveTerminate(p *process.Process) []error {
+	errors := []error{}
+
+	children, _ := p.Children()
+	for _, child := range children {
+		err := recursiveTerminate(child)
+		if err != nil {
+			errors = append(errors, err...)
+		}
+	}
+
+	err := p.Terminate()
+
+	if err != nil {
+		errors = append(errors, err)
+	}
+
+	now := time.Now()
+	deadline := now.Add(5 * time.Second)
+
+	for {
+		running, err := p.IsRunning()
+		if !running || err != nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			errors = append(errors, fmt.Errorf("killed process by force -- timeout"))
+			recursiveKill(p)
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	return errors
 }
 
 func recursiveKill(p *process.Process) {
