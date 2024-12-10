@@ -25,16 +25,20 @@ Usage:
   lid [command]
 
 Available commands:
-  start             	Starts all registered services
-  start <service>   	Starts a specific service
-  stop              	Stops all running services
-  stop <service>    	Stops a specific service
-  restart           	Restarts all services
-  restart <service> 	Restarts a specific service
-  list              	Lists the status of all services
+	list			Lists the status of all services
+	start			Starts all registered services
+	start <service>		Starts a specific service
+	stop			Stops all running services
+	stop <service>		Stops a specific service
+	restart 		Restarts all services
+	restart <service>	Restarts a specific service
+	logs				Tails the logs of all services
+	logs <service>		Tails the logs of a specific service
+	spawn <service>		Spawns and attaches to the service. Meant for debugging
 
 Available services:
     ...
+
 ```
 
 ### Example Configuration
