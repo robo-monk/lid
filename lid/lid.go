@@ -6,6 +6,8 @@ import (
 	"os"
 	"os/exec"
 	"time"
+	"sort"
+	"github.com/aquasecurity/table"
 )
 
 type Lid struct {
@@ -26,6 +28,10 @@ func New() *Lid {
 }
 
 func (lid *Lid) Register(serviceName string, s *Service) {
+	if lid.services[serviceName] != nil {
+		log.Fatalf("Cannot register '%s' service twice.\n", serviceName)
+	}
+
 	logFile, _ := os.OpenFile("lid.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	s.Name = serviceName;
 	s.Logger = log.New(logFile, fmt.Sprintf("[%s] ", s.Name), log.Ldate|log.Ltime)
@@ -69,7 +75,7 @@ func (lid *Lid) Start(services []string) {
 			if err != nil {
 				log.Printf("%v\n", err)
 			} else {
-				lid.Fork("--start-service", service.Name)
+				lid.Fork("spawn", service.Name)
 			}
 		}
 	}
@@ -93,20 +99,43 @@ func (lid *Lid) Stop(services []string) {
 }
 
 func (lid *Lid) List() {
-	for _, service := range lid.services {
+	t := table.New(os.Stdout)
+
+	t.SetHeaders("Name", "Status", "Uptime", "CPU", "Memory")
+
+	// t.AddRow("1", "Apple", "14")
+	//
+	keys := make([]string, 0, len(lid.services))
+	for key := range lid.services {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	// for _, service := range lid.services {
+	for _, serviceName := range keys {
+		service := lid.services[serviceName]
 		proc, err := service.GetProcess()
 
 		if err != nil {
-			log.Printf("%s	| STOPPED\n", service.Name)
+			// log.Printf("%s	| STOPPED\n", service.Name)
+			t.AddRow(service.Name, "Stopped", "0", "-", "-")
 			continue
 		}
 
 		createTime, _ := proc.CreateTime()
 		upTime := time.Now().UnixMilli() - createTime
 		cpu, _ := proc.CPUPercent()
+		mem, _ := proc.MemoryInfo()
 
-		log.Printf("%s	| RUNNING (%d secs) [%f%%]\n", service.Name, (upTime / 1000), cpu)
+		t.AddRow(
+			service.Name,
+			fmt.Sprintf("Running"),
+			fmt.Sprintf("%ds", upTime / 1000 ),
+			fmt.Sprintf("%f%%", cpu),
+			fmt.Sprintf("%dMB", mem.RSS / 1000000),
+		)
 	}
+
+	t.Render()
 }
 
 func (lid *Lid) GetUsage() string {
@@ -116,13 +145,14 @@ Usage:
   lid [command]
 
 Available commands:
-  start             	Starts all registered services
-  start <service>   	Starts a specific service
-  stop              	Stops all running services
-  stop <service>    	Stops a specific service
-  restart           	Restarts all services
-  restart <service> 	Restarts a specific service
-  list              	Lists the status of all services
+	list			Lists the status of all services
+	start			Starts all registered services
+	start <service>		Starts a specific service
+	stop			Stops all running services
+	stop <service>		Stops a specific service
+	restart 		Restarts all services
+	restart <service>	Restarts a specific service
+	spawn <service>		For debugging, spawns and attaches to the service
 
 Available services:
 `
@@ -156,7 +186,7 @@ func (lid *Lid) Run() {
 		fallthrough
 	case "list":
 		lid.List()
-	case "--start-service":
+	case "spawn":
 		serviceName := os.Args[2]
 		lid.logger.Printf("Starting %s\n", serviceName)
 		err := lid.services[serviceName].Start()
