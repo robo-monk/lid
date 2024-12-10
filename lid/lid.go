@@ -1,12 +1,14 @@
 package lid
 
 import (
+	"bufio"
 	"fmt"
 	"io"
 	"log"
 	"os"
 	"os/exec"
 	"sort"
+	"sync"
 	"time"
 
 	"github.com/aquasecurity/table"
@@ -140,6 +142,54 @@ func (lid *Lid) List() {
 	t.Render()
 }
 
+func (lid *Lid) Logs(services []string) {
+	var wg sync.WaitGroup
+
+	for _, service := range lid.services {
+		if len(services) > 0 {
+			if !Contains(services, service.Name) {
+				continue
+			}
+		}
+
+		logFile, err := os.Open(service.GetServiceLogFilename())
+		if err != nil {
+			log.Printf("Could not open log file for service %s: %v", service.Name, err)
+			continue
+		}
+		logFile.Close()
+
+		wg.Add(1)
+		go func(serviceName string, logFilename string) {
+			defer wg.Done()
+			log.Printf("Tailing file %s\n", logFilename)
+			cmd := exec.Command("tail", "-n", "20", "-f", logFilename)
+
+			// Prefix each line with service name
+			stdout, _ := cmd.StdoutPipe()
+			stderr, _ := cmd.StderrPipe()
+
+			go func() {
+				scanner := bufio.NewScanner(stdout)
+				for scanner.Scan() {
+					fmt.Printf("[%s] %s\n", serviceName, scanner.Text())
+				}
+			}()
+
+			go func() {
+				scanner := bufio.NewScanner(stderr)
+				for scanner.Scan() {
+					fmt.Printf("[%s][ERR] %s\n", serviceName, scanner.Text())
+				}
+			}()
+
+			cmd.Run()
+		}(service.Name, service.GetServiceLogFilename())
+	}
+
+	wg.Wait()
+}
+
 func (lid *Lid) GetUsage() string {
 	usage := `lid CLI
 
@@ -154,8 +204,9 @@ Available commands:
 	stop <service>		Stops a specific service
 	restart 		Restarts all services
 	restart <service>	Restarts a specific service
-	spawn <service>		Spawns and attaches to the service. Meant for debugging
+	logs				Tails the logs of all services
 	logs <service>		Tails the logs of a specific service
+	spawn <service>		Spawns and attaches to the service. Meant for debugging
 
 Available services:
 `
@@ -191,20 +242,7 @@ func (lid *Lid) Run() {
 	case "list":
 		lid.List()
 	case "logs":
-		serviceName := os.Args[2]
-		logFile, err := os.Open(lid.services[serviceName].GetServiceLogFilename())
-		if err != nil {
-			log.Fatalf("Could not open log file for service %s: %v", serviceName, err)
-		}
-		defer logFile.Close()
-
-		log.Printf("Tailing file %s\n", lid.services[serviceName].GetServiceLogFilename())
-		cmd := exec.Command("tail", "-n", "20", "-f", lid.services[serviceName].GetServiceLogFilename())
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		cmd.Run()
-		cmd.Wait()
-
+		lid.Logs(os.Args[2:])
 	case "spawn":
 		serviceName := os.Args[2]
 		log.Printf("Spawning '%s'\n", serviceName)
