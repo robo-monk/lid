@@ -64,13 +64,14 @@ type Service struct {
 	OnBeforeStart func(self *Service) error
 	OnAfterStart  func(self *Service)
 	OnExit        func(e *exec.ExitError, self *Service)
-
-	Stdout io.Writer
-	Stderr io.Writer
 }
 
 func (s *Service) GetServiceProcessFilename() string {
 	return fmt.Sprintf("/tmp/service-%s.lid", s.Name)
+}
+
+func (s *Service) GetServiceLogFilename() string {
+	return fmt.Sprintf("/tmp/service-%s.log", s.Name)
 }
 
 func (s *Service) getCachedProcessState() ServiceProcess {
@@ -147,16 +148,14 @@ func (s *Service) PrepareCommand() (*exec.Cmd, error) {
 		cmd.Env = append(os.Environ(), userDefinedEnv...)
 	}
 
-	if s.Stderr != nil {
-		cmd.Stderr = s.Stderr
+	logFile, err := os.OpenFile(s.GetServiceLogFilename(), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0666)
+	if err != nil {
+		s.Logger.Printf("Failed to open log file: %v\n", err)
 	} else {
-		cmd.Stderr = os.Stderr
-	}
-
-	if s.Stdout != nil {
-		cmd.Stdout = s.Stdout
-	} else {
-		cmd.Stdout = os.Stdout
+		logFileLogger := log.New(logFile, "", log.LstdFlags)
+		logFileLogger.Printf("--- Starting ---\n")
+		cmd.Stdout = io.MultiWriter(os.Stdout, logFileLogger.Writer())
+		cmd.Stderr = io.MultiWriter(os.Stderr, logFileLogger.Writer())
 	}
 
 	return cmd, nil
@@ -170,7 +169,7 @@ func (s *Service) Start() error {
 		return err
 	}
 
-	s.Logger.Printf("Command: %v\n", cmd)
+	s.Logger.Printf("Running Command: %v\n", cmd)
 
 	if s.OnBeforeStart != nil {
 		err := s.OnBeforeStart(s)

@@ -154,7 +154,8 @@ Available commands:
 	stop <service>		Stops a specific service
 	restart 		Restarts all services
 	restart <service>	Restarts a specific service
-	spawn <service>		For debugging, spawns and attaches to the service
+	spawn <service>		Spawns and attaches to the service. Meant for debugging
+	logs <service>		Tails the logs of a specific service
 
 Available services:
 `
@@ -184,10 +185,26 @@ func (lid *Lid) Run() {
 	case "restart":
 		lid.Stop(os.Args[2:])
 		lid.Start(os.Args[2:])
+
 	case "ls":
 		fallthrough
 	case "list":
 		lid.List()
+	case "logs":
+		serviceName := os.Args[2]
+		logFile, err := os.Open(lid.services[serviceName].GetServiceLogFilename())
+		if err != nil {
+			log.Fatalf("Could not open log file for service %s: %v", serviceName, err)
+		}
+		defer logFile.Close()
+
+		log.Printf("Tailing file %s\n", lid.services[serviceName].GetServiceLogFilename())
+		cmd := exec.Command("tail", "-n", "20", "-f", lid.services[serviceName].GetServiceLogFilename())
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		cmd.Run()
+		cmd.Wait()
+
 	case "spawn":
 		serviceName := os.Args[2]
 		log.Printf("Spawning '%s'\n", serviceName)
