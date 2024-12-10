@@ -14,8 +14,9 @@ It aims to have:
 
 ### Recommended Installation
 1.  Create a `lid` directory in the root of your monorepo
-2.  Create a `lid/lig.go` and register your services
-4.  `go mod tidy && go build -o lid`
+2.  Create a `lid/lid.go` and register your services
+3.  `go mod init lid && go mod tidy && go build -o lid`
+4.  Add `lid/lid.log` and `lid/lid` to `.gitignore`
 
 ### CLI Usage
 
