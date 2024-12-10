@@ -6,7 +6,7 @@ I use it in a monorepo to orchestrate various processes in production.
 It aims to have:
 - No background deamon
 - Very simple interface
-- Callbacks when processes exit
+- Hooks to help orchestrate start up, and log crashes
 - Zero(ish?) downtime when restarting applications
 
 > young code use with care
@@ -43,52 +43,52 @@ Available services:
 package main
 
 import (
-	"os/exec"
 	"github.com/robo-monk/lid/lid"
+	"os/exec"
 )
 
 func main() {
 
-    manager := lid.New()
+	manager := lid.New()
 
-    manager.Register("pocketbase", &lid.Service{
-    		// the cwd is ALWAYS relative to the executable
-        Cwd:     	"../pocketbase",
-        Command: 	[]string{"./pocketbase", "serve"},
+	manager.Register("pocketbase", &lid.Service{
+		// the cwd is ALWAYS relative to the executable
+		Cwd:     "../pocketbase",
+		Command: []string{"./pocketbase", "serve"},
 
-       	// Env file relative to Cwd
-        EnvFile: 	".env",
-        OnExit: 	func(e *exec.ExitError, service *lid.Service) {
-           	service.Logger.Println("pocketbase failed")
+		// Env file relative to Cwd
+		EnvFile: ".env",
+		OnExit: func(e *exec.ExitError, service *lid.Service) {
+			service.Logger.Println("pocketbase failed")
 
-            // ... log the error further
+			// ... log the error further
 
-            // Restart the service
-           	service.Start()
-        },
-    })
+			// Restart the service
+			service.Start()
+		},
+	})
 
-    manager.Register("backend", &lid.Service {
- 				// the cwd is ALWAYS relative to the executable
-    		Cwd: 			"../server",
-      	// Env file relative to Cwd
-      	EnvFile:	".production.env",
-        Command: 	[]string{"./dist/server"},
-        OnExit: 	func(e *exec.ExitError, service *lid.Service) {
-           	service.Start()
-        },
-    })
+	manager.Register("backend", &lid.Service{
+		// the cwd is ALWAYS relative to the executable
+		Cwd: "../server",
+		// Env file relative to Cwd
+		EnvFile: ".production.env",
+		Command: []string{"./dist/server"},
+		OnExit: func(e *exec.ExitError, service *lid.Service) {
+			service.Start()
+		},
+	})
 
-    manager.Register("frontend", &lid.Service {
-  			// the cwd is ALWAYS relative to the executable
-      	Cwd: 			"../frontend",
-        Command: 	[]string{ "pnpm", "run", "start" },
-        OnExit: 	func(e *exec.ExitError, service *lid.Service) {
-           	service.Start()
-        },
-    })
+	manager.Register("frontend", &lid.Service{
+		// the cwd is ALWAYS relative to the executable
+		Cwd:     "../frontend",
+		Command: []string{"pnpm", "run", "start"},
+		OnExit: func(e *exec.ExitError, service *lid.Service) {
+			service.Start()
+		},
+	})
 
-    manager.Run()
+	manager.Run()
 }
 ```
 
