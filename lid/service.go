@@ -191,7 +191,7 @@ func (s *Service) Start() error {
 	// Get the PID of the background process
 	s.Logger.Printf("Started with PID: %d", cmd.Process.Pid)
 
-	s.WriteServiceProcess(ServiceProcess {
+	s.WriteServiceProcess(ServiceProcess{
 		Status: RUNNING,
 		Pid:    int32(cmd.Process.Pid),
 	})

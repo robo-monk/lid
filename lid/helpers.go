@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 )
 
-
 func getExecutableDir() (string, error) {
 	// Get the path to the executable
 	execPath, err := os.Executable()

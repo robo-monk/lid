@@ -17,7 +17,7 @@ func ReadDotEnvFile(filename string) ([]string, error) {
 
 	scanner := bufio.NewScanner(file)
 
-	env := []string {}
+	env := []string{}
 
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -27,7 +27,7 @@ func ReadDotEnvFile(filename string) ([]string, error) {
 
 		// trim '"'
 		if len(value) > 0 && value[0] == '"' && value[len(value)-1] == '"' {
-			value = value[1:len(value)-1]
+			value = value[1 : len(value)-1]
 		}
 
 		env = append(env, fmt.Sprintf("%s=%s", key, value))
