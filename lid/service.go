@@ -105,12 +105,14 @@ func (s *Service) PrepareCommand() (*exec.Cmd, error) {
 	}
 
 	if s.EnvFile != "" {
-		var ferr error
 		envPath, _ := getRelativePath(filepath.Join(s.Cwd, s.EnvFile))
-		cmd.Env, ferr = ReadDotEnvFile(envPath)
-		if ferr != nil{
-			return nil, ferr
+		userDefinedEnv, err := ReadDotEnvFile(envPath)
+
+		if err != nil {
+			return nil, err
 		}
+
+		cmd.Env = append(cmd.Env, userDefinedEnv...)
 	}
 
 	cmd.Stdout = os.Stdout
