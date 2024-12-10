@@ -28,9 +28,9 @@ func main() {
     })
 
 
-    manager.Register("insights-api-scraper", &lid.Service {
+    manager.Register("b", &lid.Service {
       	Cwd: "../../../../convex/convex/convex-insights/scrape-server",
-       	// EnvFile: ".env",
+       	EnvFile: ".env",
        	Command: []string { "bun", "run", "./src/index.ts" },
        	OnExit: func(e *exec.ExitError, service *lid.Service) {
           		service.Logger.Println("scraper failed...")

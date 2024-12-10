@@ -144,7 +144,7 @@ func (s *Service) PrepareCommand() (*exec.Cmd, error) {
 			return nil, err
 		}
 
-		cmd.Env = append(cmd.Env, userDefinedEnv...)
+		cmd.Env = append(os.Environ(), userDefinedEnv...)
 	}
 
 	if s.Stderr != nil {
