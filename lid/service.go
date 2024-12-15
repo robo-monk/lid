@@ -71,10 +71,6 @@ func (s *Service) GetServiceProcessFilename() string {
 	return fmt.Sprintf("/tmp/service-%s.lid", s.Name)
 }
 
-func (s *Service) GetServiceLogFilename() string {
-	return fmt.Sprintf("/tmp/service-%s.log", s.Name)
-}
-
 func (s *Service) getCachedProcessState() ServiceProcess {
 	sp, error := ReadServiceProcess(s.GetServiceProcessFilename())
 	if error != nil {
@@ -149,15 +145,20 @@ func (s *Service) PrepareCommand() (*exec.Cmd, error) {
 		cmd.Env = append(os.Environ(), userDefinedEnv...)
 	}
 
-	logFile, err := os.OpenFile(s.GetServiceLogFilename(), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0666)
-	if err != nil {
-		s.Logger.Printf("Failed to open log file: %v\n", err)
-	} else {
-		logFileLogger := log.New(logFile, "", log.LstdFlags)
-		logFileLogger.Printf("--- Starting ---\n")
-		cmd.Stdout = io.MultiWriter(os.Stdout, logFileLogger.Writer())
-		cmd.Stderr = io.MultiWriter(os.Stderr, logFileLogger.Writer())
-	}
+	s.Logger.Println("Starting")
+	cmd.Stdout = io.MultiWriter(os.Stdout, s.Logger.Writer())
+	cmd.Stderr = io.MultiWriter(os.Stderr, s.Logger.Writer())
+
+	// stdout, _ := cmd.StdoutPipe()
+	// scanner := bufio.NewScanner(stdout)
+
+	// targetMessage := "bing"
+	// for scanner.Scan() {
+	// 	line := scanner.Text()
+	// 	if strings.Contains(line, targetMessage) {
+	// 		break
+	// 	}
+	// }
 
 	return cmd, nil
 }
@@ -175,7 +176,7 @@ func (s *Service) Start() error {
 	if s.OnBeforeStart != nil {
 		err := s.OnBeforeStart(s)
 		if err != nil {
-			s.Logger.Printf("rejected start: %v\n", err)
+			s.Logger.Printf("Rejected start: %v\n", err)
 			return err
 		}
 	}

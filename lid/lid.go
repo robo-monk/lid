@@ -1,14 +1,12 @@
 package lid
 
 import (
-	"bufio"
 	"fmt"
 	"io"
 	"log"
 	"os"
 	"os/exec"
 	"sort"
-	"sync"
 	"time"
 
 	"github.com/aquasecurity/table"
@@ -16,19 +14,35 @@ import (
 
 type Lid struct {
 	services map[string]*Service
+	logsFilename string
 	logger   *log.Logger
 }
 
-func New() *Lid {
-	logFile, err := os.OpenFile("lid.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+type LidOptions struct {
+	LogsFilename	string
+}
+
+func NewWithOptions(options LidOptions) (*Lid, error) {
+	logFile, err := os.OpenFile(options.LogsFilename, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
-		log.Fatalf("Failed to open log file: %v", err)
+		return nil, err
 	}
 
-	return &Lid{
+	return &Lid {
+		logsFilename: options.LogsFilename,
 		logger:   log.New(logFile, "", log.Ldate|log.Ltime),
 		services: make(map[string]*Service),
+	}, nil
+}
+
+func New() *Lid {
+	lid, err := NewWithOptions(LidOptions {
+		LogsFilename: "lid.log",
+	})
+	if err != nil {
+		log.Fatalln(err)
 	}
+	return lid
 }
 
 func (lid *Lid) Register(serviceName string, s *Service) {
@@ -143,51 +157,11 @@ func (lid *Lid) List() {
 }
 
 func (lid *Lid) Logs(services []string) {
-	var wg sync.WaitGroup
-
-	for _, service := range lid.services {
-		if len(services) > 0 {
-			if !Contains(services, service.Name) {
-				continue
-			}
-		}
-
-		logFile, err := os.Open(service.GetServiceLogFilename())
-		if err != nil {
-			log.Printf("Could not open log file for service %s: %v", service.Name, err)
-			continue
-		}
-		logFile.Close()
-
-		wg.Add(1)
-		go func(serviceName string, logFilename string) {
-			defer wg.Done()
-			log.Printf("Tailing file %s\n", logFilename)
-			cmd := exec.Command("tail", "-n", "20", "-f", logFilename)
-
-			// Prefix each line with service name
-			stdout, _ := cmd.StdoutPipe()
-			stderr, _ := cmd.StderrPipe()
-
-			go func() {
-				scanner := bufio.NewScanner(stdout)
-				for scanner.Scan() {
-					fmt.Printf("[%s] %s\n", serviceName, scanner.Text())
-				}
-			}()
-
-			go func() {
-				scanner := bufio.NewScanner(stderr)
-				for scanner.Scan() {
-					fmt.Printf("[%s][ERR] %s\n", serviceName, scanner.Text())
-				}
-			}()
-
-			cmd.Run()
-		}(service.Name, service.GetServiceLogFilename())
-	}
-
-	wg.Wait()
+	log.Printf("Tailing file %s\n", lid.logsFilename)
+	cmd := exec.Command("tail", "-n", "20", "-f", lid.logsFilename)
+	cmd.Stdout = os.Stdout;
+	cmd.Stderr = os.Stderr;
+	cmd.Run()
 }
 
 func (lid *Lid) GetUsage() string {

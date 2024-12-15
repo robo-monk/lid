@@ -8,7 +8,6 @@ import (
 func main() {
 
     manager := lid.New()
-
     manager.Register("pocketbase", &lid.Service{
         Cwd:     "../../../../convex/convex/pocketbase",
         Command: []string{"./convex-pb", "serve"},
@@ -27,7 +26,6 @@ func main() {
         },
     })
 
-
     manager.Register("b", &lid.Service {
       	Cwd: "../../../../convex/convex/convex-insights/scrape-server",
        	EnvFile: ".env",
@@ -36,7 +34,6 @@ func main() {
           		service.Logger.Println("scraper failed...")
         },
     })
-
 
     manager.Run()
 }
