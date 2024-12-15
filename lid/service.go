@@ -1,6 +1,7 @@
 package lid
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/binary"
 	"fmt"
@@ -17,6 +18,9 @@ import (
 const NO_PID int32 = 0
 
 type ServiceStatus int8
+
+const READINESS_CHECK_PASSED_MESSAGE = "Readiness check passed"
+const NO_READINESS_CHECK_MESSAGE = "No readiness check, assuming success"
 
 const (
 	STOPPED ServiceStatus = iota
@@ -62,22 +66,52 @@ type Service struct {
 	Command []string
 	EnvFile string
 
-	OnBeforeStart func(self *Service) error
-	OnAfterStart  func(self *Service)
-	OnExit        func(e *exec.ExitError, self *Service)
+	Stdout io.Writer
+	Stderr io.Writer
+
+	StdoutReadinessCheck func(line string) bool
+	OnBeforeStart        func(self *Service) error
+	OnAfterStart         func(self *Service)
+	OnExit               func(e *exec.ExitError, self *Service)
 }
 
 type ServiceConfig struct {
-	Cwd           string
-	Command       []string
-	EnvFile       string
-	OnBeforeStart func(self *Service) error
-	OnAfterStart  func(self *Service)
-	OnExit        func(e *exec.ExitError, self *Service)
+	Cwd     string
+	Command []string
+	EnvFile string
+
+	Stdout io.Writer
+	Stderr io.Writer
+
+	Logger               *log.Logger
+	StdoutReadinessCheck func(line string) bool
+	OnBeforeStart        func(self *Service) error
+	OnAfterStart         func(self *Service)
+	OnExit               func(e *exec.ExitError, self *Service)
+}
+
+func NewService(name string, config ServiceConfig) *Service {
+	if config.Logger == nil {
+		config.Logger = log.New(os.Stdout, fmt.Sprintf("[%s] ", name), log.Ldate|log.Ltime)
+	}
+
+	return &Service{
+		Name:                 name,
+		Cwd:                  config.Cwd,
+		Command:              config.Command,
+		EnvFile:              config.EnvFile,
+		StdoutReadinessCheck: config.StdoutReadinessCheck,
+		OnBeforeStart:        config.OnBeforeStart,
+		OnAfterStart:         config.OnAfterStart,
+		OnExit:               config.OnExit,
+		Stdout:               config.Stdout,
+		Stderr:               config.Stderr,
+		Logger:               config.Logger,
+	}
 }
 
 func (s *Service) GetServiceProcessFilename() string {
-	return fmt.Sprintf("/tmp/service-%s.lid", s.Name)
+	return filepath.Join(os.TempDir(), fmt.Sprintf("service-%s.lid", s.Name))
 }
 
 func (s *Service) getCachedProcessState() ServiceProcess {
@@ -155,63 +189,104 @@ func (s *Service) PrepareCommand() (*exec.Cmd, error) {
 	}
 
 	s.Logger.Println("Starting")
-	cmd.Stdout = io.MultiWriter(os.Stdout, s.Logger.Writer())
-	cmd.Stderr = io.MultiWriter(os.Stderr, s.Logger.Writer())
 
-	// stdout, _ := cmd.StdoutPipe()
-	// scanner := bufio.NewScanner(stdout)
-
-	// targetMessage := "bing"
-	// for scanner.Scan() {
-	// 	line := scanner.Text()
-	// 	if strings.Contains(line, targetMessage) {
-	// 		break
-	// 	}
-	// }
-
+	cmd.Stdout = s.Stdout
+	cmd.Stderr = s.Stderr
 	return cmd, nil
 }
 
-func (s *Service) Start() error {
+func (s *Service) handleReadinessCheck(reader io.ReadCloser, pid int32) error {
+	readinessDone := make(chan bool)
 
-	cmd, err := s.PrepareCommand()
-	if err != nil {
-		s.Logger.Printf("%v\n", err)
-		return err
+	if s.StdoutReadinessCheck != nil {
+		s.WriteServiceProcess(ServiceProcess{
+			Status: STARTING,
+			Pid:    pid,
+		})
+
+		s.Logger.Println("Waiting for readiness check")
+		go func() {
+			defer close(readinessDone)
+			scanner := bufio.NewScanner(reader)
+
+			for scanner.Scan() {
+				if s.StdoutReadinessCheck(scanner.Text()) {
+					break
+				}
+			}
+			s.Logger.Println(READINESS_CHECK_PASSED_MESSAGE)
+			s.WriteServiceProcess(ServiceProcess{
+				Status: RUNNING,
+				Pid:    pid,
+			})
+		}()
+	} else {
+		s.Logger.Println(NO_READINESS_CHECK_MESSAGE)
+		s.WriteServiceProcess(ServiceProcess{
+			Status: RUNNING,
+			Pid:    pid,
+		})
+		close(readinessDone)
 	}
 
-	s.Logger.Printf("Running Command: %v\n", cmd)
+	select {
+	case <-readinessDone:
+		return nil
+	case <-time.After(10 * time.Second):
+		s.Logger.Println("Readiness check timed out")
+		return fmt.Errorf("readiness check timed out")
+	}
+}
 
-	if s.OnBeforeStart != nil {
-		err := s.OnBeforeStart(s)
+func (s *Service) Start() error {
+	cmd, err := s.PrepareCommand()
+
+	{
+		reader, writer := io.Pipe()
+		s.Stdout = io.MultiWriter(os.Stdout, writer)
+		s.Stderr = io.MultiWriter(os.Stderr, writer)
+
+		defer reader.Close()
+		defer writer.Close()
+
 		if err != nil {
-			s.Logger.Printf("Rejected start: %v\n", err)
+			s.Logger.Printf("%v\n", err)
 			return err
+		}
+
+		s.Logger.Printf("Running Command: %v\n", cmd)
+
+		if s.OnBeforeStart != nil {
+			if err := s.OnBeforeStart(s); err != nil {
+				s.Logger.Printf("Rejected start: %v\n", err)
+				return err
+			}
+		}
+
+		if err := cmd.Start(); err != nil {
+			err = fmt.Errorf("failed to start command: %v", err)
+			s.Logger.Printf("%v\n", err)
+			return err
+		}
+
+		s.Logger.Printf("Started with PID: %d", cmd.Process.Pid)
+
+		if err := s.handleReadinessCheck(reader, int32(cmd.Process.Pid)); err != nil {
+			return err
+		}
+
+		if s.OnAfterStart != nil {
+			s.OnAfterStart(s)
 		}
 	}
 
-	err = cmd.Start()
-
-	if err != nil {
-		err := fmt.Errorf("failed to start command: %v", err)
-		s.Logger.Printf("%v\n", err)
-		return err
-	}
-
-	// Get the PID of the background process
-	s.Logger.Printf("Started with PID: %d", cmd.Process.Pid)
-
-	s.WriteServiceProcess(ServiceProcess{
-		Status: RUNNING,
-		Pid:    int32(cmd.Process.Pid),
-	})
-
-	if s.OnAfterStart != nil {
-		s.OnAfterStart(s)
-	}
-
+	s.Logger.Println("Waiting for process to exit")
 	err = cmd.Wait()
+	s.handleProcessExit(err)
+	return nil
+}
 
+func (s *Service) handleProcessExit(err error) {
 	if err != nil {
 		s.Logger.Printf("%v\n", err)
 	}
@@ -229,8 +304,6 @@ func (s *Service) Start() error {
 	} else {
 		s.Logger.Println("Stopped")
 	}
-
-	return nil
 }
 
 func (s *Service) Stop() error {
@@ -246,10 +319,20 @@ func (s *Service) Stop() error {
 		Pid:    NO_PID,
 	})
 
-	errors := recursiveTerminate(process)
+	// errors := recursiveTerminate(process)
+	running, err := process.IsRunning()
+	if !running {
+		return fmt.Errorf("process already terminated")
+	}
 
-	if len(errors) > 0 {
-		return fmt.Errorf("failed to terminate service: %v", errors)
+	if err != nil {
+		return fmt.Errorf("failed to check if process is running: %v", err)
+	}
+
+	err = process.Terminate()
+
+	if err != nil {
+		return fmt.Errorf("failed to terminate service: %v", err)
 	}
 
 	return nil
@@ -264,6 +347,7 @@ func recursiveTerminate(p *process.Process) []error {
 	errors := []error{}
 
 	children, _ := p.Children()
+	fmt.Printf("Terminating %d children\n", len(children))
 	for _, child := range children {
 		err := recursiveTerminate(child)
 		if err != nil {
@@ -271,7 +355,14 @@ func recursiveTerminate(p *process.Process) []error {
 		}
 	}
 
-	err := p.Terminate()
+	fmt.Printf("terminating %d\n", p.Pid)
+	running, err := p.IsRunning()
+	fmt.Printf("running: %v, err: %v\n", running, err)
+	if !running {
+		return append(errors, fmt.Errorf("process already terminated"))
+	}
+
+	err = p.Terminate()
 
 	if err != nil {
 		errors = append(errors, err)
@@ -286,7 +377,7 @@ func recursiveTerminate(p *process.Process) []error {
 			break
 		}
 		if time.Now().After(deadline) {
-			errors = append(errors, fmt.Errorf("killed process by force -- timeout"))
+			errors = append(errors, fmt.Errorf("killed process by force because of timeout"))
 			recursiveKill(p)
 			break
 		}

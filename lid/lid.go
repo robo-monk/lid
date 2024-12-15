@@ -1,12 +1,15 @@
 package lid
 
 import (
+	"bufio"
 	"fmt"
 	"io"
 	"log"
 	"os"
 	"os/exec"
 	"sort"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/aquasecurity/table"
@@ -36,8 +39,13 @@ func NewWithOptions(options LidOptions) (*Lid, error) {
 }
 
 func New() *Lid {
+	logsFilename, err := getRelativePath("lid.log")
+	if err != nil {
+		log.Fatalln(err)
+	}
+
 	lid, err := NewWithOptions(LidOptions{
-		LogsFilename: "lid.log",
+		LogsFilename: logsFilename,
 	})
 	if err != nil {
 		log.Fatalln(err)
@@ -46,73 +54,118 @@ func New() *Lid {
 }
 
 func (lid *Lid) Register(serviceName string, s ServiceConfig) {
-	if lid.services[serviceName] != nil {
+	if _, ok := lid.services[serviceName]; ok {
 		log.Fatalf("Cannot register '%s' service twice.\n", serviceName)
 	}
 
-	logFile, _ := os.OpenFile("lid.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	logFile, _ := os.OpenFile(lid.logsFilename, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 
-	lid.services[serviceName] = &Service{
-		Name:   serviceName,
-		Logger: log.New(io.MultiWriter(os.Stdout, logFile), fmt.Sprintf("[%s] ", serviceName), log.Ldate|log.Ltime),
+	if s.Logger == nil {
+		logger := log.New(io.MultiWriter(os.Stdout, logFile), fmt.Sprintf("[%s] ", serviceName), log.Ldate|log.Ltime)
+
+		if s.Stdout == nil {
+			s.Stdout = logger.Writer()
+		}
+
+		if s.Stderr == nil {
+			s.Stderr = logger.Writer()
+		}
+
+		s.Logger = logger
 	}
+
+	lid.services[serviceName] = NewService(serviceName, s)
 }
 
-func (lid *Lid) Fork(args ...string) {
+func (lid *Lid) ForkSpawn(serviceName string) {
+	service, ok := lid.services[serviceName]
+	if !ok {
+		lid.logger.Printf("Service '%s' not found\n", serviceName)
+		return
+	}
+
 	// exe
 	executablePath, _ := os.Executable()
-	cmd := exec.Command(executablePath, args...)
+	cmd := exec.Command(executablePath, "spawn", serviceName)
+
+	reader, writer := io.Pipe()
+	cmd.Stdout = writer
+	cmd.Stderr = io.MultiWriter(os.Stderr, writer)
 
 	// fork
 	cmd.Start()
-	cmd.Process.Release()
-}
 
-func Contains[T comparable](s []T, e T) bool {
-	for _, v := range s {
-		if v == e {
-			return true
+	// wait for "Readiness check passed" with timeout
+	scanner := bufio.NewScanner(reader)
+	start := time.Now()
+	timeout := time.After(5 * time.Second)
+	readyChan := make(chan bool)
+
+	go func() {
+		for scanner.Scan() {
+			line := scanner.Text()
+			if strings.Contains(line, READINESS_CHECK_PASSED_MESSAGE) || strings.Contains(line, NO_READINESS_CHECK_MESSAGE) {
+				readyChan <- true
+				return
+			}
 		}
+	}()
+
+	select {
+	case <-readyChan:
+		service.Logger.Printf("Started successfully in %s\n", time.Since(start))
+	case <-timeout:
+		service.Logger.Printf("Warning: Service is taking longer than 5 seconds to start")
 	}
-	return false
+
+	cmd.Process.Release()
+	reader.Close()
+	writer.Close()
 }
 
 func (lid *Lid) Start(services []string) {
+	var wg sync.WaitGroup
+
 	for _, service := range lid.services {
 		if len(services) > 0 {
-			if !Contains(services, service.Name) {
+			if !contains(services, service.Name) {
 				continue
 			}
 		}
 
-		proc, err := service.GetRunningProcess()
-		if err == nil {
-			log.Printf("%s: Running with PID %d\n", service.Name, proc.Pid)
-		} else {
-			log.Printf("%s: Starting \n", service.Name)
-			_, err := service.PrepareCommand()
-			if err != nil {
-				log.Printf("%s: %v\n", service.Name, err)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			proc, err := service.GetRunningProcess()
+			if err == nil {
+				service.Logger.Printf("Running with PID %d\n", proc.Pid)
 			} else {
-				lid.Fork("spawn", service.Name)
+				_, err := service.PrepareCommand()
+				if err != nil {
+					log.Printf("%s: %v\n", service.Name, err)
+				} else {
+					lid.ForkSpawn(service.Name)
+				}
 			}
-		}
+		}()
 	}
+
+	wg.Wait()
 }
 
 func (lid *Lid) Stop(services []string) {
 	for _, service := range lid.services {
 		if len(services) > 0 {
-			if !Contains(services, service.Name) {
+			if !contains(services, service.Name) {
 				continue
 			}
 		}
 
 		err := service.Stop()
 		if err != nil {
-			log.Printf("%s: %v\n", service.Name, err)
+			service.Logger.Printf("%s: %v\n", service.Name, err)
 		} else {
-			log.Printf("%s: Stopped\n", service.Name)
+			service.Logger.Printf("%s: Stopped\n", service.Name)
 		}
 	}
 }
@@ -145,9 +198,19 @@ func (lid *Lid) List() {
 		mem, _ := proc.MemoryInfo()
 		pid := proc.Pid
 
+		status := service.GetCachedStatus()
+		statusStr := ""
+		if status == STARTING {
+			statusStr = "\033[33mStarting\033[0m"
+		} else if status == RUNNING {
+			statusStr = "\033[32mRunning\033[0m"
+		} else if status == STOPPED {
+			statusStr = "\033[31mStopped\033[0m"
+		}
+
 		t.AddRow(
 			service.Name,
-			"\033[32mRunning\033[0m",
+			statusStr,
 			fmt.Sprintf("%ds", upTime/1000),
 			fmt.Sprintf("%d", pid),
 			fmt.Sprintf("%f%%", cpu),
@@ -212,7 +275,6 @@ func (lid *Lid) Run() {
 	case "restart":
 		lid.Stop(os.Args[2:])
 		lid.Start(os.Args[2:])
-
 	case "ls":
 		fallthrough
 	case "list":
@@ -221,7 +283,6 @@ func (lid *Lid) Run() {
 		lid.Logs(os.Args[2:])
 	case "spawn":
 		serviceName := os.Args[2]
-		log.Printf("Spawning '%s'\n", serviceName)
 		lid.logger.Printf("Starting %s\n", serviceName)
 		err := lid.services[serviceName].Start()
 		if err != nil {

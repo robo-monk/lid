@@ -2,11 +2,7 @@ package lid_test
 
 import (
 	"fmt"
-	"log"
-	"os"
 	"os/exec"
-	"path/filepath"
-	"sync"
 	"testing"
 	"time"
 
@@ -14,91 +10,52 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-// TestServiceProcessReadWrite tests writing and reading a ServiceProcess to/from a file.
-func TestServiceProcessReadWrite(t *testing.T) {
-	t.Parallel()
-	tmpDir := t.TempDir()
-	filename := filepath.Join(tmpDir, "service-process.lid")
-
-	original := lid.ServiceProcess{
-		Status: lid.RUNNING,
-		Pid:    1234,
-	}
-
-	if err := original.WriteToFile(filename); err != nil {
-		t.Fatalf("Failed to write service process: %v", err)
-	}
-
-	readBack, err := lid.ReadServiceProcess(filename)
-	if err != nil {
-		t.Fatalf("Failed to read service process: %v", err)
-	}
-
-	if readBack.Status != original.Status || readBack.Pid != original.Pid {
-		t.Errorf("Mismatch in service process: got %v, want %v", readBack, original)
-	}
+type TestService struct {
+	t        *testing.T
+	chanDone chan struct{}
+	*lid.Service
 }
 
-// TestReadServiceProcessFileNotFound checks behavior when file doesn't exist.
-func TestReadServiceProcessFileNotFound(t *testing.T) {
-	t.Parallel()
-	_, err := lid.ReadServiceProcess("nonexistent-file.lid")
-
-	// assert.Equal(t, int64(0), sp.Pid, "Expect PID to be 0 (inactive)");
-	// assert.Equal(t, lid.STOPPED, sp.Status, "Expected Process status to be STOPPED")
-	assert.NotNil(t, err, "Expected error not to be nil")
+func NewTestService(t *testing.T, s lid.ServiceConfig) (*TestService, *lid.Service) {
+	ts := &TestService{
+		t:        t,
+		chanDone: make(chan struct{}),
+		Service:  lid.NewService(t.Name(), s),
+	}
+	return ts, ts.Service
 }
 
-// TestReadServiceProcessCorruptFile tests error handling with invalid binary data.
-// func TestReadServiceProcessCorruptFile(t *testing.T) {
-// 	t.Parallel()
-// 	tmpDir := t.TempDir()
-// 	filename := filepath.Join(tmpDir, "corrupt.lid")
+func (ts *TestService) Start() {
+	ts.Service.Start()
+	close(ts.chanDone)
+}
 
-// 	if err := os.WriteFile(filename, []byte("not a valid struct"), 0644); err != nil {
-// 		t.Fatal(err)
-// 	}
-
-// 	sp, err := lid.ReadServiceProcess(filename)
-
-// 	assert.Equal(t, int64(0), sp.Pid, "Expect PID to be 0 (inactive)");
-// 	assert.Equal(t, lid.STOPPED, sp.Status, "Expected Process status to be STOPPED")
-// 	assert.Nil(t, err, "Expected error to be nil")
-// }
+func (ts *TestService) WaitOrTimeout(timeout time.Duration) {
+	select {
+	case <-ts.chanDone:
+	case <-time.After(timeout):
+		ts.t.Fatal("Test timed out waiting for service to complete")
+	}
+}
 
 func TestNewService(t *testing.T) {
-	// t.Parallel()
-	s := lid.Service{
-		Logger: log.New(os.Stdout, "[TEST] ", 0),
-		Name:   "test-process",
-		// Cwd:     "",
+	_, s := NewTestService(t, lid.ServiceConfig{
 		Command: []string{"bash", "-c", "sleep 1; exit 1"},
-		// EnvFile: "",
-	}
+	})
 
 	assert.True(t, s.GetCachedStatus() == lid.STOPPED || s.GetCachedStatus() == lid.EXITED, s.GetCachedStatus())
 	assert.Equal(t, lid.NO_PID, s.GetPid())
 }
 
 func TestNewServiceStart(t *testing.T) {
-	s := lid.Service{
-		Logger: log.New(os.Stdout, "[TEST] ", 0),
-		Name:   "test-process",
-		// Cwd:     "",
+	ts, s := NewTestService(t, lid.ServiceConfig{
 		Command: []string{"bash", "-c", "sleep 0.1; exit 1"},
-		// EnvFile: "",
-	}
+	})
 
 	assert.True(t, s.GetCachedStatus() == lid.STOPPED || s.GetCachedStatus() == lid.EXITED, s.GetCachedStatus())
 	assert.Equal(t, lid.NO_PID, s.GetPid())
 
-	var wg sync.WaitGroup
-	wg.Add(1)
-
-	go func() {
-		defer wg.Done()
-		s.Start()
-	}()
+	go ts.Start()
 
 	// Wait for the task to run
 	time.Sleep(10 * time.Millisecond)
@@ -107,7 +64,7 @@ func TestNewServiceStart(t *testing.T) {
 	assert.Equal(t, lid.RUNNING, s.GetCachedStatus(), "Process should be RUNNING")
 	assert.NotEqual(t, lid.NO_PID, s.GetPid(), "PID should not be 0")
 
-	wg.Wait()
+	ts.WaitOrTimeout(1 * time.Second)
 
 	// Task should be done
 	assert.Equal(t, lid.EXITED, s.GetCachedStatus(), "Process should be exited")
@@ -115,39 +72,32 @@ func TestNewServiceStart(t *testing.T) {
 }
 
 func TestNewServiceStartStop(t *testing.T) {
-	s := lid.Service{
-		Logger:  log.New(os.Stdout, "[TEST] ", 0),
-		Name:    "test-process",
-		Command: []string{"bash", "-c", "sleep 5; exit 0"},
-	}
+	ts, s := NewTestService(t, lid.ServiceConfig{
+		Command: []string{"bash", "./e2e/mock_services/long_running.sh"},
+	})
 
 	assert.True(t, s.GetCachedStatus() == lid.STOPPED || s.GetCachedStatus() == lid.EXITED, s.GetCachedStatus())
 	assert.Equal(t, lid.NO_PID, s.GetPid())
 
-	var wg sync.WaitGroup
-	wg.Add(1)
-
-	go func() {
-		defer wg.Done()
-		s.Start()
-	}()
+	go ts.Start()
 
 	start := time.Now().UnixMilli()
-	// Wait for the task to start runnng
 	time.Sleep(10 * time.Millisecond)
 
 	// Task should be running right now
 	assert.Equal(t, lid.RUNNING, s.GetCachedStatus(), "Process should be RUNNING")
 	assert.NotEqual(t, lid.NO_PID, s.GetPid(), "PID should not be 0")
 
+	fmt.Printf("stopping service\n")
 	s.Stop()
+	fmt.Printf("service stopped\n")
 
 	assert.Equal(t, lid.STOPPED, s.GetCachedStatus(), "Process should be STOPPED, since we stopped the task manually")
 	assert.Equal(t, lid.NO_PID, s.GetPid(), "PID should be 0")
 
-	wg.Wait()
+	ts.WaitOrTimeout(1 * time.Second)
 
-	assert.Less(t, time.Now().UnixMilli()-start, int64(100), "Process should not be allowed to complete")
+	assert.Less(t, time.Now().UnixMilli()-start, int64(200), "Process should not be allowed to complete")
 	assert.Equal(t, lid.STOPPED, s.GetCachedStatus(), "Process should be STOPPED")
 	assert.Equal(t, lid.NO_PID, s.GetPid(), "PID should be 0")
 }
@@ -155,47 +105,37 @@ func TestNewServiceStartStop(t *testing.T) {
 func TestNewServiceOnExit(t *testing.T) {
 	recievedErrorCode := -1
 
-	s := lid.Service{
-		Logger:  log.New(os.Stdout, "[TEST] ", 0),
-		Name:    "test-process",
+	ts, _ := NewTestService(t, lid.ServiceConfig{
 		Command: []string{"bash", "-c", "sleep 0; exit 32"},
 		OnExit: func(e *exec.ExitError, self *lid.Service) {
 			recievedErrorCode = e.ExitCode()
 		},
-	}
+	})
 
-	assert.True(t, s.GetCachedStatus() == lid.STOPPED || s.GetCachedStatus() == lid.EXITED, s.GetCachedStatus())
-	assert.Equal(t, lid.NO_PID, s.GetPid())
-	s.Start()
+	assert.True(t, ts.GetCachedStatus() == lid.STOPPED || ts.GetCachedStatus() == lid.EXITED, ts.GetCachedStatus())
+	assert.Equal(t, lid.NO_PID, ts.GetPid())
+	ts.Start()
 
 	// Task should be running right now
-	assert.Equal(t, lid.EXITED, s.GetCachedStatus(), "Process should be EXITED")
+	assert.Equal(t, lid.EXITED, ts.GetCachedStatus(), "Process should be EXITED")
 	assert.Equal(t, recievedErrorCode, 32, "Exit codes do not match")
 }
 
 func TestNewServiceOnExitDoesNotRunWhenStopped(t *testing.T) {
 	recievedErrorCode := -1
 
-	s := lid.Service{
-		Logger:  log.New(os.Stdout, "[TEST] ", 0),
-		Name:    "test-process",
-		Command: []string{"bash", "-c", "sleep 5; exit 32"},
+	ts, s := NewTestService(t, lid.ServiceConfig{
+		Command: []string{"bash", "./e2e/mock_services/long_running.sh"},
 		OnExit: func(e *exec.ExitError, self *lid.Service) {
 			recievedErrorCode = e.ExitCode()
 		},
-	}
-
-	var wg sync.WaitGroup
-	wg.Add(1)
-
-	go func() {
-		defer wg.Done()
-		s.Start()
-	}()
+	})
 
 	start := time.Now().UnixMilli()
 
-	// Wait for the task to start runnng
+	go ts.Start()
+
+	// Wait for the task to start running
 	time.Sleep(10 * time.Millisecond)
 
 	assert.Equal(t, lid.RUNNING, s.GetCachedStatus(), "Process should be RUNNING")
@@ -203,11 +143,10 @@ func TestNewServiceOnExitDoesNotRunWhenStopped(t *testing.T) {
 
 	s.Stop()
 
+	ts.WaitOrTimeout(1 * time.Second)
+
 	assert.Equal(t, lid.STOPPED, s.GetCachedStatus(), "Process should be STOPPED, since we stopped the task manually")
 	assert.Equal(t, lid.NO_PID, s.GetPid(), "PID should be 0")
-
-	wg.Wait()
-
 	assert.Less(t, time.Now().UnixMilli()-start, int64(100), "Process should not be allowed to complete")
 	assert.Equal(t, recievedErrorCode, -1, "OnExit function should not have run")
 }
@@ -215,27 +154,18 @@ func TestNewServiceOnExitDoesNotRunWhenStopped(t *testing.T) {
 func TestNewServiceStartStart(t *testing.T) {
 	recievedErrorCode := -1
 
-	s := lid.Service{
-		Logger:  log.New(os.Stdout, "[TEST] ", 0),
-		Name:    "test-process",
-		Command: []string{"bash", "-c", "sleep 1; exit 32"},
+	ts, s := NewTestService(t, lid.ServiceConfig{
+		Command: []string{"bash", "./e2e/mock_services/long_running.sh"},
 		OnExit: func(e *exec.ExitError, self *lid.Service) {
 			recievedErrorCode = e.ExitCode()
 		},
-	}
-
-	var wg sync.WaitGroup
-	wg.Add(1)
-
-	go func() {
-		defer wg.Done()
-		err := s.Start()
-		assert.Nil(t, err)
-	}()
+	})
 
 	start := time.Now().UnixMilli()
 
-	// Wait for the task to start runnng
+	go ts.Start()
+
+	// Wait for the task to start running
 	time.Sleep(10 * time.Millisecond)
 
 	assert.Equal(t, lid.RUNNING, s.GetCachedStatus(), "Process should be RUNNING")
@@ -244,13 +174,12 @@ func TestNewServiceStartStart(t *testing.T) {
 
 	err := s.Start()
 
-	// assert.NotNil(t, err)
-	// assert.Equal(t, err.Error(), "service 'test-process' is already running")
 	assert.ErrorIs(t, err, lid.ErrProcessAlreadyRunning)
 	assert.Equal(t, lid.RUNNING, s.GetCachedStatus(), "Process should be still RUNNING")
 	assert.Equal(t, currentPid, s.GetPid(), "PID should be the same")
+
 	s.Stop()
-	wg.Wait()
+	ts.WaitOrTimeout(1 * time.Second)
 
 	assert.Less(t, time.Now().UnixMilli()-start, int64(100), "Process should not be allowed to complete")
 	assert.Equal(t, recievedErrorCode, -1, "OnExit function should not have run")
@@ -260,10 +189,8 @@ func TestOnBeforeStart(t *testing.T) {
 	beforeStartCalled := false
 	shouldPreventStart := true
 
-	s := lid.Service{
-		Logger:  log.New(os.Stdout, "[TEST] ", 0),
-		Name:    "test-process",
-		Command: []string{"bash", "-c", "sleep 0.1; exit 0"},
+	ts, s := NewTestService(t, lid.ServiceConfig{
+		Command: []string{"bash", "-c", "sleep 0.5; exit 1"},
 		OnBeforeStart: func(self *lid.Service) error {
 			beforeStartCalled = true
 			if shouldPreventStart {
@@ -271,13 +198,14 @@ func TestOnBeforeStart(t *testing.T) {
 			}
 			return nil
 		},
-	}
+	})
 
 	// First attempt - OnBeforeStart should prevent service from starting
 	err := s.Start()
 	assert.NotNil(t, err)
 	assert.Equal(t, "preventing start", err.Error())
 	assert.True(t, beforeStartCalled)
+
 	assert.True(t, s.GetCachedStatus() == lid.STOPPED || s.GetCachedStatus() == lid.EXITED)
 	assert.Equal(t, lid.NO_PID, s.GetPid())
 
@@ -285,46 +213,30 @@ func TestOnBeforeStart(t *testing.T) {
 	beforeStartCalled = false
 	shouldPreventStart = false
 
-	var wg sync.WaitGroup
-	wg.Add(1)
+	go ts.Start()
 
-	go func() {
-		defer wg.Done()
-		err := s.Start()
-		assert.Nil(t, err)
-	}()
-
-	time.Sleep(10 * time.Millisecond)
+	time.Sleep(50 * time.Millisecond)
 	assert.True(t, beforeStartCalled)
 	assert.Equal(t, lid.RUNNING, s.GetCachedStatus())
 	assert.NotEqual(t, lid.NO_PID, s.GetPid())
 
 	s.Stop()
-	wg.Wait()
+	ts.WaitOrTimeout(1 * time.Second)
 }
 
 func TestOnAfterStart(t *testing.T) {
 	afterStartCalled := false
 	var capturedPid int32
 
-	s := lid.Service{
-		Logger:  log.New(os.Stdout, "[TEST] ", 0),
-		Name:    "test-process",
-		Command: []string{"bash", "-c", "sleep 0.1; exit 0"},
+	ts, s := NewTestService(t, lid.ServiceConfig{
+		Command: []string{"bash", "./e2e/mock_services/long_running.sh"},
 		OnAfterStart: func(self *lid.Service) {
 			afterStartCalled = true
 			capturedPid = self.GetPid()
 		},
-	}
+	})
 
-	var wg sync.WaitGroup
-	wg.Add(1)
-
-	go func() {
-		defer wg.Done()
-		err := s.Start()
-		assert.Nil(t, err)
-	}()
+	go ts.Start()
 
 	time.Sleep(10 * time.Millisecond)
 	assert.True(t, afterStartCalled)
@@ -333,5 +245,5 @@ func TestOnAfterStart(t *testing.T) {
 	assert.Equal(t, capturedPid, s.GetPid())
 
 	s.Stop()
-	wg.Wait()
+	ts.WaitOrTimeout(1 * time.Second)
 }

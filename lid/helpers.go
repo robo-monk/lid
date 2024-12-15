@@ -29,3 +29,12 @@ func getRelativePath(relativePath string) (string, error) {
 	fullPath := filepath.Join(execDir, relativePath)
 	return fullPath, nil
 }
+
+func contains[T comparable](s []T, e T) bool {
+	for _, v := range s {
+		if v == e {
+			return true
+		}
+	}
+	return false
+}

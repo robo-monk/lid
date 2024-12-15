@@ -8,9 +8,11 @@ build:
 	go mod tidy
 	go build -o bin/lid cmd/lid/main.go
 
+
+.PHONY: lint test
+
 test:
 	go test -v ./...
 
-.PHONY: lint
 lint:
 	gofmt -w .

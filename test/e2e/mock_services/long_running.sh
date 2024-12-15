@@ -7,5 +7,5 @@ trap 'echo "Received SIGINT, shutting down..."; exit 0' SIGINT
 echo "Starting long-running service..."
 while true; do
     echo "Service is running... $(date)"
-    sleep 1
+    sleep 0.01
 done 
