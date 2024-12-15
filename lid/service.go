@@ -67,6 +67,15 @@ type Service struct {
 	OnExit        func(e *exec.ExitError, self *Service)
 }
 
+type ServiceConfig struct {
+	Cwd           string
+	Command       []string
+	EnvFile       string
+	OnBeforeStart func(self *Service) error
+	OnAfterStart  func(self *Service)
+	OnExit        func(e *exec.ExitError, self *Service)
+}
+
 func (s *Service) GetServiceProcessFilename() string {
 	return fmt.Sprintf("/tmp/service-%s.lid", s.Name)
 }

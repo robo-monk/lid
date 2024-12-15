@@ -23,8 +23,7 @@ go.work.sum
 # env file
 .env
 
-cmd/lid/lid
-
+bin/
 
 .DS_Store
 

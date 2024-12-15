@@ -13,13 +13,13 @@ import (
 )
 
 type Lid struct {
-	services map[string]*Service
+	services     map[string]*Service
 	logsFilename string
-	logger   *log.Logger
+	logger       *log.Logger
 }
 
 type LidOptions struct {
-	LogsFilename	string
+	LogsFilename string
 }
 
 func NewWithOptions(options LidOptions) (*Lid, error) {
@@ -28,15 +28,15 @@ func NewWithOptions(options LidOptions) (*Lid, error) {
 		return nil, err
 	}
 
-	return &Lid {
+	return &Lid{
 		logsFilename: options.LogsFilename,
-		logger:   log.New(logFile, "", log.Ldate|log.Ltime),
-		services: make(map[string]*Service),
+		logger:       log.New(logFile, "", log.Ldate|log.Ltime),
+		services:     make(map[string]*Service),
 	}, nil
 }
 
 func New() *Lid {
-	lid, err := NewWithOptions(LidOptions {
+	lid, err := NewWithOptions(LidOptions{
 		LogsFilename: "lid.log",
 	})
 	if err != nil {
@@ -45,15 +45,17 @@ func New() *Lid {
 	return lid
 }
 
-func (lid *Lid) Register(serviceName string, s *Service) {
+func (lid *Lid) Register(serviceName string, s ServiceConfig) {
 	if lid.services[serviceName] != nil {
 		log.Fatalf("Cannot register '%s' service twice.\n", serviceName)
 	}
 
 	logFile, _ := os.OpenFile("lid.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	s.Name = serviceName
-	s.Logger = log.New(io.MultiWriter(os.Stdout, logFile), fmt.Sprintf("[%s] ", s.Name), log.Ldate|log.Ltime)
-	lid.services[serviceName] = s
+
+	lid.services[serviceName] = &Service{
+		Name:   serviceName,
+		Logger: log.New(io.MultiWriter(os.Stdout, logFile), fmt.Sprintf("[%s] ", serviceName), log.Ldate|log.Ltime),
+	}
 }
 
 func (lid *Lid) Fork(args ...string) {
@@ -159,8 +161,8 @@ func (lid *Lid) List() {
 func (lid *Lid) Logs(services []string) {
 	log.Printf("Tailing file %s\n", lid.logsFilename)
 	cmd := exec.Command("tail", "-n", "20", "-f", lid.logsFilename)
-	cmd.Stdout = os.Stdout;
-	cmd.Stderr = os.Stderr;
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
 	cmd.Run()
 }
 
