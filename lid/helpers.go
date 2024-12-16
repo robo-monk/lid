@@ -1,9 +1,12 @@
 package lid
 
 import (
+	"bufio"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"time"
 )
 
 func getExecutableDir() (string, error) {
@@ -37,4 +40,38 @@ func contains[T comparable](s []T, e T) bool {
 		}
 	}
 	return false
+}
+
+func tailFile(filePath string, callback func(line string) bool) error {
+	// Open the file for reading.
+	file, err := os.Open(filePath)
+	if err != nil {
+		return fmt.Errorf("failed to open file: %w", err)
+	}
+	defer file.Close()
+
+	// Seek to the end of the file.
+	_, err = file.Seek(0, io.SeekEnd)
+	if err != nil {
+		return fmt.Errorf("failed to seek to end of file: %w", err)
+	}
+
+	reader := bufio.NewReader(file)
+
+	for {
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			// Handle EOF: Wait for new data to be written.
+			if err.Error() == "EOF" {
+				time.Sleep(50 * time.Millisecond) // Polling interval.
+				continue
+			}
+			return fmt.Errorf("error reading file: %w", err)
+		}
+
+		// Print the line that was read.
+		if callback(line) {
+			return nil
+		}
+	}
 }

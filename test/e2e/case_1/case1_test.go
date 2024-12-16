@@ -18,34 +18,21 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func assertStopped(t *testing.T, output string, processName string) {
-	regex := regexp.MustCompile(fmt.Sprintf(`%s.+│.+Stopped.+│ (-) `, processName))
-	match := regex.FindStringSubmatch(output)
-	require.Equal(t, 2, len(match))
+func setupGoMod(t *testing.T, dir string) {
+	goModContent := `module case1
+go 1.22.4
+
+replace github.com/robo-monk/lid => ../../../../
+require github.com/robo-monk/lid v0.0.0
+`
+	err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte(goModContent), 0644)
+	require.NoError(t, err)
 }
 
 func getProcessList(t *testing.T) string {
 	output := runCmd(t, "./case1", "list")
 	fmt.Println("\n output: ", output)
 	return output
-}
-
-func captureRunningProcess(t *testing.T, output string, processName string) (int, *process.Process) {
-	regexExpr := fmt.Sprintf(`%s.+│.+Running.+│ (\d+) │ `, processName)
-	fmt.Println("regexExpr", regexExpr)
-	regex := regexp.MustCompile(regexExpr)
-	match := regex.FindStringSubmatch(output)
-	fmt.Println("match", match)
-	require.Equal(t, 2, len(match))
-	pid, err := strconv.Atoi(match[1]) // parse the pid
-	require.NoError(t, err)
-	fmt.Printf("Captured PID: %v\n", pid)
-	process, err := process.NewProcess(int32(pid))
-	require.NoError(t, err)
-	isRunning, err := process.IsRunning()
-	require.NoError(t, err)
-	require.True(t, isRunning)
-	return pid, process
 }
 
 type ProcessInfo struct {
@@ -107,6 +94,12 @@ func AssertProcessStatus(t *testing.T, processName string, status string) {
 	require.NoError(t, err)
 	assert.Equal(t, status, processInfo.Status)
 }
+func RequireProcessStatus(t *testing.T, processName string, status string) {
+	output := getProcessList(t)
+	processInfo, err := GetProcessInfoByName(output, processName)
+	require.NoError(t, err)
+	require.Equal(t, status, processInfo.Status)
+}
 
 func CaptureRunningProcess(t *testing.T, processName string) *process.Process {
 	output := getProcessList(t)
@@ -139,75 +132,42 @@ func TestCase1(t *testing.T) {
 
 	// Ensure cleanup
 	defer func() {
-		// os.Remove(filepath.Join(testdataDir, "case1"))
+
+		runCmd(t, "./case1", "stop")
+
+		os.Remove(filepath.Join(testdataDir, "case1"))
 		os.Remove(filepath.Join(testdataDir, "lid.log"))
 		os.Remove(filepath.Join(testdataDir, "go.mod"))
 		os.Remove(filepath.Join(testdataDir, "go.sum"))
 	}()
 
-	runCmd(t, "go", "mod", "init", "case1")
+	setupGoMod(t, testdataDir)
 	runCmd(t, "go", "mod", "tidy")
 	runCmd(t, "go", "build", "-o", "case1")
-	runCmd(t, "./case1", "start")
 
-	AssertProcessStatus(t, "unstable-service", "Starting")
+	RequireProcessStatus(t, "worker", "Stopped")
+
+	go runCmd(t, "./case1", "start", "worker")
+
+	time.Sleep(100 * time.Millisecond)
+
+	AssertProcessStatus(t, "worker", "Starting")
+	AssertProcessStatus(t, "unstable-service", "Stopped")
+
 	// Give services time to start
 	time.Sleep(500 * time.Millisecond)
-
 	// Test process management
-	AssertProcessStatus(t, "unstable-service", "Running")
-	// AssertProcessStatus(t, "worker", "Running")
-
-	return
-	process := CaptureRunningProcess(t, "unstable-service")
-	children, err := process.Children()
-	require.NoError(t, err)
-	require.Equal(t, 1, len(children))
-	children[0].Kill()
-
-	AssertProcessStatus(t, "unstable-service", "Stopped")
 	AssertProcessStatus(t, "worker", "Running")
+	AssertProcessStatus(t, "unstable-service", "Stopped")
 
-	process = CaptureRunningProcess(t, "worker")
-	children, err = process.Children()
-	require.NoError(t, err)
-	require.Equal(t, 1, len(children))
-	children[0].Kill()
+	// start other process
+	runCmd(t, "./case1", "start", "unstable-service")
+	AssertProcessStatus(t, "worker", "Running")
+	AssertProcessStatus(t, "unstable-service", "Running")
 
-	AssertProcessStatus(t, "worker", "Stopped")
-
-	// _, process := captureRunningProcess(t, output, "unstable-service")
-	// children, err := process.Children()
-	// require.NoError(t, err)
-	// require.Equal(t, 1, len(children))
-	// children[0].Kill()
-
-	// _, process = captureRunningProcess(t, output, "worker")
-	// children, err = process.Children()
-	// require.NoError(t, err)
-	// require.Equal(t, 1, len(children))
-	// children[0].Kill()
-
-	// pid, err := GetPIDByName(output, "unstable-service")
-	require.NoError(t, err)
-	// fmt.Println("pid", pid)
+	runCmd(t, "./case1", "stop")
+	time.Sleep(500 * time.Millisecond)
+	RequireProcessStatus(t, "worker", "Stopped")
+	RequireProcessStatus(t, "unstable-service", "Stopped")
 	return
-
-	// output = getProcessList(t)
-	// assertStopped(t, output, "unstable-service")
-	// assertStopped(t, output, "worker")
-
-	// time.Sleep(100 * time.Millisecond)
-
-	// output = getProcessList(t)
-	// captureRunningProcess(t, output, "unstable-service")
-	// captureRunningProcess(t, output, "worker")
-
-	// runCmd(t, "./case1", "stop")
-
-	// time.Sleep(2000 * time.Millisecond)
-
-	// output = getProcessList(t)
-	// assertStopped(t, output, "unstable-service")
-	// assertStopped(t, output, "worker")
 }

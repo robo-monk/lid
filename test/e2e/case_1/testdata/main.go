@@ -1,9 +1,10 @@
 package main
 
 import (
-	"fmt"
 	"os/exec"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/robo-monk/lid/lid"
 )
@@ -20,19 +21,18 @@ func main() {
 	// 	},
 	// })
 
+	const START_MS = 500
+	const LOOP_MS = 250
 	// Background worker that processes jobs
 	manager.Register("worker", lid.ServiceConfig{
-		Cwd:     "../../mock_services",
-		Command: []string{"bash", "long_running.sh"},
+		Cwd:                   "../../mock_services",
+		Command:               []string{ "bash", "slow_start.sh", strconv.Itoa(START_MS), strconv.Itoa(LOOP_MS) },
+		ReadinessCheckTimeout: 1 * time.Second,
 		StdoutReadinessCheck: func(line string) bool {
-			// service.Logger.Println("Checking readiness:", line)
-			// return strings.Contains(line, "Starting")
-			fmt.Println("Checking readiness:", line)
-			return strings.Contains(line, "Service is running")
+			return strings.Contains(line, "Started")
 		},
 		OnExit: func(e *exec.ExitError, service *lid.Service) {
-			service.Logger.Println("Worker exited unexpectedly, restarting...")
-			service.Start()
+			service.Logger.Println("Worker exited unexpectedly??")
 		},
 	})
 

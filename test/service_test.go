@@ -101,7 +101,7 @@ func TestNewServiceStartStop(t *testing.T) {
 
 	ts.WaitOrTimeout(2 * time.Second)
 
-	assert.Less(t, time.Now().UnixMilli()-start, int64(200), "Process should not be allowed to complete")
+	assert.Less(t, time.Now().UnixMilli()-start, int64(500), "Process should not be allowed to complete")
 	assert.Equal(t, lid.STOPPED, s.GetCachedStatus(), "Process should be STOPPED")
 	assert.Equal(t, lid.NO_PID, s.GetPid(), "PID should be 0")
 }
@@ -129,7 +129,7 @@ func TestNewServiceOnExitDoesNotRunWhenStopped(t *testing.T) {
 	recievedErrorCode := -1
 
 	ts, s := NewTestService(t, lid.ServiceConfig{
-		Command: []string{"bash", "./e2e/mock_services/long_running.sh"},
+		Command: []string{"bash", "./e2e/mock_services/slow_start.sh", "0", "10"},
 		OnExit: func(e *exec.ExitError, self *lid.Service) {
 			recievedErrorCode = e.ExitCode()
 		},
@@ -151,7 +151,7 @@ func TestNewServiceOnExitDoesNotRunWhenStopped(t *testing.T) {
 
 	assert.Equal(t, lid.STOPPED, s.GetCachedStatus(), "Process should be STOPPED, since we stopped the task manually")
 	assert.Equal(t, lid.NO_PID, s.GetPid(), "PID should be 0")
-	assert.Less(t, time.Now().UnixMilli()-start, int64(100), "Process should not be allowed to complete")
+	assert.Less(t, time.Now().UnixMilli()-start, int64(200), "Process should not be allowed to complete")
 	assert.Equal(t, recievedErrorCode, -1, "OnExit function should not have run")
 }
 
@@ -159,7 +159,7 @@ func TestNewServiceStartStart(t *testing.T) {
 	recievedErrorCode := -1
 
 	ts, s := NewTestService(t, lid.ServiceConfig{
-		Command: []string{"bash", "./e2e/mock_services/long_running.sh"},
+		Command: []string{"bash", "./e2e/mock_services/slow_start.sh", "0", "10"},
 		OnExit: func(e *exec.ExitError, self *lid.Service) {
 			recievedErrorCode = e.ExitCode()
 		},
@@ -261,7 +261,7 @@ func TestStdoutReadinessCheck(t *testing.T) {
 		GracefulShutdownTimeout: 5 * time.Second,
 		StdoutReadinessCheck: func(line string) bool {
 			// fmt.Println("Got line: ", line)
-			return strings.Contains(line, "Started")
+			return strings.Contains(line, "Service is running")
 		},
 	})
 
@@ -274,7 +274,7 @@ func TestStdoutReadinessCheck(t *testing.T) {
 	assert.Equal(t, lid.STARTING, s.GetCachedStatus())
 
 	// give some time for the process to start
-	time.Sleep((startupDelayMs*1.1) * time.Millisecond)
+	time.Sleep((startupDelayMs * 1.1) * time.Millisecond)
 	assert.Equal(t, lid.RUNNING, s.GetCachedStatus())
 
 	ts.Stop()

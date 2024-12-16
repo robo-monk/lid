@@ -1,7 +1,6 @@
 package lid
 
 import (
-	"bufio"
 	"fmt"
 	"io"
 	"log"
@@ -88,29 +87,41 @@ func (lid *Lid) ForkSpawn(serviceName string) {
 	executablePath, _ := os.Executable()
 	cmd := exec.Command(executablePath, "spawn", serviceName)
 
-	reader, writer := io.Pipe()
-	cmd.Stdout = io.MultiWriter(os.Stdout, writer)
-	cmd.Stderr = io.MultiWriter(os.Stderr, writer)
+	// temp process indpendent file
+	tempFile, err := os.CreateTemp("", "lid-spawn-")
 
-	// fork
-	cmd.Start()
+	if err != nil {
+		service.Logger.Printf("Failed to create temp file: %v\n", err)
+		return
+	}
 
-	// wait for "Readiness check passed" with timeout
-	scanner := bufio.NewScanner(reader)
+	// Remove the temp file when done
+	defer os.Remove(tempFile.Name())
+	defer tempFile.Close()
+
+	cmd.Stdout = tempFile
+	cmd.Stderr = tempFile
+
+	// Start command in background
+	if err := cmd.Start(); err != nil {
+		service.Logger.Printf("Failed to start service: %v\n", err)
+		return
+	}
+
+	readyChan := make(chan bool)
 	start := time.Now()
 	timeout := time.After(service.ReadinessCheckTimeout)
-	readyChan := make(chan bool)
 
-	go func() {
-		for scanner.Scan() {
-			line := scanner.Text()
-			if strings.Contains(line, READINESS_CHECK_PASSED_MESSAGE) || strings.Contains(line, NO_READINESS_CHECK_MESSAGE) {
-				readyChan <- true
-				return
-			}
+	go tailFile(tempFile.Name(), func(line string) bool {
+		fmt.Print("\t", line)
+		if strings.Contains(line, READINESS_CHECK_PASSED_MESSAGE) || strings.Contains(line, NO_READINESS_CHECK_MESSAGE) {
+			readyChan <- true
+			return true
 		}
-	}()
+		return false
+	})
 
+	// wait for "Readiness check passed" with timeout
 	select {
 	case <-readyChan:
 		service.Logger.Printf("Started successfully in %s\n", time.Since(start))
@@ -118,9 +129,9 @@ func (lid *Lid) ForkSpawn(serviceName string) {
 		service.Logger.Printf("Warning: Service is taking longer than %.2f second(s) to start. Consider configuring the service's 'ReadinessCheckTimeout'.", service.ReadinessCheckTimeout.Seconds())
 	}
 
+	// Detach the process
 	cmd.Process.Release()
-	reader.Close()
-	writer.Close()
+	service.Logger.Printf("Detached process\n")
 }
 
 func (lid *Lid) Start(services []string) {
@@ -141,7 +152,7 @@ func (lid *Lid) Start(services []string) {
 				service.Logger.Printf("Running with PID %d\n", proc.Pid)
 			} else {
 				lid.ForkSpawn(service.Name)
-				// _, err := service.PrepareCommand(os.Stdout)
+				// _, err := service.PrepareCommand()
 				// if err != nil {
 				// 	log.Printf("%s: %v\n", service.Name, err)
 				// } else {

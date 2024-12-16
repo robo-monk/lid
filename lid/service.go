@@ -135,23 +135,23 @@ func NewService(name string, config ServiceConfig) *Service {
 		Logger:                  config.Logger,
 	}
 
-	p, err := service.GetRunningProcess()
-	if err != nil || p == nil {
-		state := service.getCachedProcessState()
-		if state.Status == STOPPED || state.Status == EXITED {
-			service.WriteServiceProcess(ServiceProcess{
-				Status: state.Status,
-				Pid:    NO_PID,
-			})
-		} else {
-			service.WriteServiceProcess(ServiceProcess{
-				Status: STOPPED,
-				Pid:    NO_PID,
-			})
-		}
-	} else {
-		// process is already running / stopping
-	}
+	// p, err := service.GetRunningProcess()
+	// if err != nil || p == nil {
+	// 	state := service.getCachedProcessState()
+	// 	if state.Status == STOPPED || state.Status == EXITED {
+	// 		service.WriteServiceProcess(ServiceProcess{
+	// 			Status: state.Status,
+	// 			Pid:    NO_PID,
+	// 		})
+	// 	} else {
+	// 		service.WriteServiceProcess(ServiceProcess{
+	// 			Status: STOPPED,
+	// 			Pid:    NO_PID,
+	// 		})
+	// 	}
+	// } else {
+	// 	// process is already running / stopping
+	// }
 
 	return service
 }
@@ -237,11 +237,6 @@ func (s *Service) PrepareCommand() (*exec.Cmd, error) {
 
 	s.Logger.Println("Starting")
 
-	// cmd.Stdout = s.Stdout
-	// cmd.Stderr = s.Stderr
-
-	// cmd.Stdout = stdoutWriter
-	// cmd.Stderr = stdoutWriter
 	return cmd, nil
 }
 
@@ -260,7 +255,6 @@ func (s *Service) handleReadinessCheck(reader io.Reader, pid int32) error {
 			defer close(readinessDone)
 			scanner := bufio.NewScanner(reader)
 
-			fmt.Println("threaded checking...")
 			readinessCheckPassed := false
 			for scanner.Scan() {
 				bytes := scanner.Bytes()
@@ -310,18 +304,20 @@ func (s *Service) Start() error {
 		return err
 	}
 
-	reader, err := cmd.StdoutPipe()
+	readerStdout, err := cmd.StdoutPipe()
+	if err != nil {
+		s.Logger.Printf("%v\n", err)
+		return err
+	}
+
+	readerStderr, err := cmd.StderrPipe()
 
 	if err != nil {
 		s.Logger.Printf("%v\n", err)
 		return err
 	}
 
-	// var buffer bytes.Buffer
-	// teeReader := io.TeeReader(reader, &buffer)
-	// teeReader := io.TeeReader(reader, &buffer)
-
-
+	reader := io.MultiReader(readerStdout, readerStderr)
 	s.Logger.Printf("Running Command: %v\n", cmd)
 
 	if s.OnBeforeStart != nil {
@@ -343,7 +339,8 @@ func (s *Service) Start() error {
 		return err
 	}
 
-	go io.Copy(s.Stdout, reader)
+	// go io.Copy(s.Stdout, reader)
+	go io.Copy(s.Logger.Writer(), reader)
 
 	if s.OnAfterStart != nil {
 		s.OnAfterStart(s)
@@ -361,7 +358,7 @@ func (s *Service) handleProcessExit(err error) {
 	}
 
 	if s.getCachedProcessState().Status != STOPPED {
-		s.Logger.Println("Exited")
+		s.Logger.Printf("Exited: %v\n", err.(*exec.ExitError))
 		s.WriteServiceProcess(ServiceProcess{
 			Status: EXITED,
 			Pid:    NO_PID,
