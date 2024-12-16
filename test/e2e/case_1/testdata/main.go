@@ -1,7 +1,9 @@
 package main
 
 import (
+	"fmt"
 	"os/exec"
+	"strings"
 
 	"github.com/robo-monk/lid/lid"
 )
@@ -19,8 +21,15 @@ func main() {
 	// })
 
 	// Background worker that processes jobs
-	manager.Register("worker", &lid.Service{
-		Command: []string{"bash", "../../mock_services/long_running.sh"},
+	manager.Register("worker", lid.ServiceConfig{
+		Cwd:     "../../mock_services",
+		Command: []string{"bash", "long_running.sh"},
+		StdoutReadinessCheck: func(line string) bool {
+			// service.Logger.Println("Checking readiness:", line)
+			// return strings.Contains(line, "Starting")
+			fmt.Println("Checking readiness:", line)
+			return strings.Contains(line, "Service is running")
+		},
 		OnExit: func(e *exec.ExitError, service *lid.Service) {
 			service.Logger.Println("Worker exited unexpectedly, restarting...")
 			service.Start()
@@ -28,10 +37,13 @@ func main() {
 	})
 
 	// Crash-prone service to test recovery
-	manager.Register("unstable-service", &lid.Service{
-		Command: []string{"bash", "../../mock_services/crash_service.sh"},
+	manager.Register("unstable-service", lid.ServiceConfig{
+		Cwd:     "../../mock_services",
+		Command: []string{"bash", "crash_service.sh"},
+		StdoutReadinessCheck: func(line string) bool {
+			return strings.Contains(line, "Starting crash-prone service...")
+		},
 		OnExit: func(e *exec.ExitError, service *lid.Service) {
-			service.Logger.Println("Unstable service crashed, restarting with backoff...")
 			service.Start()
 		},
 	})

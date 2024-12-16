@@ -89,7 +89,7 @@ func (lid *Lid) ForkSpawn(serviceName string) {
 	cmd := exec.Command(executablePath, "spawn", serviceName)
 
 	reader, writer := io.Pipe()
-	cmd.Stdout = writer
+	cmd.Stdout = io.MultiWriter(os.Stdout, writer)
 	cmd.Stderr = io.MultiWriter(os.Stderr, writer)
 
 	// fork
@@ -98,7 +98,7 @@ func (lid *Lid) ForkSpawn(serviceName string) {
 	// wait for "Readiness check passed" with timeout
 	scanner := bufio.NewScanner(reader)
 	start := time.Now()
-	timeout := time.After(5 * time.Second)
+	timeout := time.After(service.ReadinessCheckTimeout)
 	readyChan := make(chan bool)
 
 	go func() {
@@ -115,7 +115,7 @@ func (lid *Lid) ForkSpawn(serviceName string) {
 	case <-readyChan:
 		service.Logger.Printf("Started successfully in %s\n", time.Since(start))
 	case <-timeout:
-		service.Logger.Printf("Warning: Service is taking longer than 5 seconds to start")
+		service.Logger.Printf("Warning: Service is taking longer than %.2f second(s) to start. Consider configuring the service's 'ReadinessCheckTimeout'.", service.ReadinessCheckTimeout.Seconds())
 	}
 
 	cmd.Process.Release()
@@ -140,12 +140,13 @@ func (lid *Lid) Start(services []string) {
 			if err == nil {
 				service.Logger.Printf("Running with PID %d\n", proc.Pid)
 			} else {
-				_, err := service.PrepareCommand()
-				if err != nil {
-					log.Printf("%s: %v\n", service.Name, err)
-				} else {
-					lid.ForkSpawn(service.Name)
-				}
+				lid.ForkSpawn(service.Name)
+				// _, err := service.PrepareCommand(os.Stdout)
+				// if err != nil {
+				// 	log.Printf("%s: %v\n", service.Name, err)
+				// } else {
+				// 	lid.ForkSpawn(service.Name)
+				// }
 			}
 		}()
 	}
@@ -175,8 +176,6 @@ func (lid *Lid) List() {
 
 	t.SetHeaders("Name", "Status", "Uptime", "PID", "CPU", "Memory")
 
-	// t.AddRow("1", "Apple", "14")
-	//
 	keys := make([]string, 0, len(lid.services))
 	for key := range lid.services {
 		keys = append(keys, key)

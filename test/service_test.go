@@ -3,11 +3,14 @@ package lid_test
 import (
 	"fmt"
 	"os/exec"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/robo-monk/lid/lid"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 type TestService struct {
@@ -26,7 +29,8 @@ func NewTestService(t *testing.T, s lid.ServiceConfig) (*TestService, *lid.Servi
 }
 
 func (ts *TestService) Start() {
-	ts.Service.Start()
+	err := ts.Service.Start()
+	require.NoError(ts.t, err)
 	close(ts.chanDone)
 }
 
@@ -95,7 +99,7 @@ func TestNewServiceStartStop(t *testing.T) {
 	assert.Equal(t, lid.STOPPED, s.GetCachedStatus(), "Process should be STOPPED, since we stopped the task manually")
 	assert.Equal(t, lid.NO_PID, s.GetPid(), "PID should be 0")
 
-	ts.WaitOrTimeout(1 * time.Second)
+	ts.WaitOrTimeout(2 * time.Second)
 
 	assert.Less(t, time.Now().UnixMilli()-start, int64(200), "Process should not be allowed to complete")
 	assert.Equal(t, lid.STOPPED, s.GetCachedStatus(), "Process should be STOPPED")
@@ -246,4 +250,33 @@ func TestOnAfterStart(t *testing.T) {
 
 	s.Stop()
 	ts.WaitOrTimeout(1 * time.Second)
+}
+
+func TestStdoutReadinessCheck(t *testing.T) {
+	const startupDelayMs = 200
+	const loopDelayMs = 200
+	ts, s := NewTestService(t, lid.ServiceConfig{
+		Command: []string{
+			"bash", "./e2e/mock_services/slow_start.sh", strconv.Itoa(startupDelayMs), strconv.Itoa(loopDelayMs)},
+		GracefulShutdownTimeout: 5 * time.Second,
+		StdoutReadinessCheck: func(line string) bool {
+			// fmt.Println("Got line: ", line)
+			return strings.Contains(line, "Started")
+		},
+	})
+
+	ts.Stop()
+	assert.Equal(t, lid.STOPPED, s.GetCachedStatus())
+
+	go ts.Start()
+
+	time.Sleep(10 * time.Millisecond)
+	assert.Equal(t, lid.STARTING, s.GetCachedStatus())
+
+	// give some time for the process to start
+	time.Sleep((startupDelayMs*1.1) * time.Millisecond)
+	assert.Equal(t, lid.RUNNING, s.GetCachedStatus())
+
+	ts.Stop()
+	assert.Equal(t, lid.STOPPED, s.GetCachedStatus())
 }
