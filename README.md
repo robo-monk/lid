@@ -95,8 +95,3 @@ func main() {
 	manager.Run()
 }
 ```
-
-### Run it as a service
-```
-system-ctl enable --now path/to/lid/exe start
-```
