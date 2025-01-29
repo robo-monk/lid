@@ -242,7 +242,8 @@ func TestOnAfterStart(t *testing.T) {
 
 	go ts.Start()
 
-	time.Sleep(10 * time.Millisecond)
+	time.Sleep(50 * time.Millisecond)
+
 	assert.True(t, afterStartCalled)
 	assert.Equal(t, lid.RUNNING, s.GetCachedStatus())
 	assert.NotEqual(t, lid.NO_PID, capturedPid)

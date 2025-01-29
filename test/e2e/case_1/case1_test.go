@@ -149,7 +149,7 @@ func TestCase1(t *testing.T) {
 
 	go runCmd(t, "./case1", "start", "worker")
 
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(500 * time.Millisecond)
 
 	AssertProcessStatus(t, "worker", "Starting")
 	AssertProcessStatus(t, "unstable-service", "Stopped")

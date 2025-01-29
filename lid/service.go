@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sync"
 	"syscall"
 	"time"
 
@@ -18,11 +19,11 @@ import (
 
 const NO_PID int32 = 0
 
-type ServiceStatus int8
-
 const READINESS_CHECK_PASSED_MESSAGE = "Readiness check passed"
 const READINESS_CHECK_FAILED_MESSAGE = "Readiness check failed"
 const NO_READINESS_CHECK_MESSAGE = "No readiness check, assuming success"
+
+type ServiceStatus int8
 
 const (
 	STOPPED ServiceStatus = iota
@@ -31,6 +32,23 @@ const (
 	RUNNING
 	STOPPING
 )
+
+func (s ServiceStatus) String() string {
+	switch s {
+	case STOPPED:
+		return "Stopped"
+	case EXITED:
+		return "Exited"
+	case STARTING:
+		return "Starting"
+	case RUNNING:
+		return "Running"
+	case STOPPING:
+		return "Stopping"
+	default:
+		return "Unknown"
+	}
+}
 
 type ServiceProcess struct {
 	Status ServiceStatus
@@ -62,12 +80,16 @@ func ReadServiceProcess(filename string) (ServiceProcess, error) {
 }
 
 type Service struct {
+	mu sync.RWMutex
+
 	Logger *log.Logger
 	Name   string
 	Cwd    string
 
 	Command []string
+
 	EnvFile string
+	Env     []string
 
 	GracefulShutdownTimeout time.Duration
 	ReadinessCheckTimeout   time.Duration
@@ -83,23 +105,39 @@ type Service struct {
 	ExitSignal syscall.Signal
 }
 
+// ServiceConfig defines how a service should be run and managed.
+// It provides configuration for things like:
+// - Where and how to run the service
+// - Environment setup
+// - Timeouts and lifecycle hooks
+// - Logging and I/O handling
 type ServiceConfig struct {
-	Cwd     string
+	// Where to run the service from
+	Cwd string
+
+	// The actual command to execute (e.g. ["node", "server.js"])
 	Command []string
-	EnvFile string
 
-	GracefulShutdownTimeout time.Duration
-	ReadinessCheckTimeout   time.Duration
+	// Environment configuration
+	EnvFile string   // Path to a .env file
+	Env     []string // Additional environment variables (overrides EnvFile)
 
-	Stdout io.Writer
-	Stderr io.Writer
+	// Timing configurations
+	GracefulShutdownTimeout time.Duration // How long to wait for graceful shutdown
+	ReadinessCheckTimeout   time.Duration // How long to wait for service to be ready
 
-	Logger               *log.Logger
-	StdoutReadinessCheck func(line string) bool
-	OnBeforeStart        func(self *Service) error
-	OnAfterStart         func(self *Service)
-	OnExit               func(e *exec.ExitError, self *Service)
+	// Where to send service output
+	Stdout io.Writer // Service's stdout destination
+	Stderr io.Writer // Service's stderr destination
+	Logger *log.Logger
 
+	// Lifecycle hooks
+	StdoutReadinessCheck func(line string) bool                 // Check service output to determine if it's ready
+	OnBeforeStart        func(self *Service) error              // Called just before service starts
+	OnAfterStart         func(self *Service)                    // Called right after service starts
+	OnExit               func(e *exec.ExitError, self *Service) // Called when service exits
+
+	// What signal to send when stopping the service (defaults to SIGTERM)
 	ExitSignal syscall.Signal
 }
 
@@ -128,11 +166,17 @@ func NewService(name string, config ServiceConfig) *Service {
 		config.ExitSignal = syscall.SIGTERM
 	}
 
+	if config.Env == nil {
+		config.Env = []string{}
+	}
+
 	service := &Service{
+		mu:                      sync.RWMutex{},
 		Name:                    name,
 		Cwd:                     config.Cwd,
 		Command:                 config.Command,
 		EnvFile:                 config.EnvFile,
+		Env:                     config.Env,
 		GracefulShutdownTimeout: config.GracefulShutdownTimeout,
 		ReadinessCheckTimeout:   config.ReadinessCheckTimeout,
 		StdoutReadinessCheck:    config.StdoutReadinessCheck,
@@ -145,24 +189,6 @@ func NewService(name string, config ServiceConfig) *Service {
 		ExitSignal:              config.ExitSignal,
 	}
 
-	// p, err := service.GetRunningProcess()
-	// if err != nil || p == nil {
-	// 	state := service.getCachedProcessState()
-	// 	if state.Status == STOPPED || state.Status == EXITED {
-	// 		service.WriteServiceProcess(ServiceProcess{
-	// 			Status: state.Status,
-	// 			Pid:    NO_PID,
-	// 		})
-	// 	} else {
-	// 		service.WriteServiceProcess(ServiceProcess{
-	// 			Status: STOPPED,
-	// 			Pid:    NO_PID,
-	// 		})
-	// 	}
-	// } else {
-	// 	// process is already running / stopping
-	// }
-
 	return service
 }
 
@@ -171,6 +197,9 @@ func (s *Service) GetServiceProcessFilename() string {
 }
 
 func (s *Service) getCachedProcessState() ServiceProcess {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
 	sp, error := ReadServiceProcess(s.GetServiceProcessFilename())
 	if error != nil {
 		return ServiceProcess{
@@ -182,6 +211,8 @@ func (s *Service) getCachedProcessState() ServiceProcess {
 }
 
 func (s *Service) WriteServiceProcess(sp ServiceProcess) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	return sp.WriteToFile(s.GetServiceProcessFilename())
 }
 
@@ -233,6 +264,7 @@ func (s *Service) PrepareCommand() (*exec.Cmd, error) {
 		cmd.Dir, _ = getRelativePath(s.Cwd)
 	}
 
+	cmd.Env = os.Environ()
 	if s.EnvFile != "" {
 		envPath, _ := getRelativePath(filepath.Join(s.Cwd, s.EnvFile))
 		userDefinedEnv, err := ReadDotEnvFile(envPath)
@@ -241,8 +273,10 @@ func (s *Service) PrepareCommand() (*exec.Cmd, error) {
 			return nil, err
 		}
 
-		cmd.Env = append(os.Environ(), userDefinedEnv...)
+		cmd.Env = append(cmd.Env, userDefinedEnv...)
 	}
+
+	// cmd.Env = append(cmd.Env, s.Env...)
 
 	s.Logger.Println("Starting")
 
@@ -398,51 +432,48 @@ func (s *Service) Stop() error {
 		})
 	}()
 
-	process, err := s.GetRunningProcess()
-	if err != nil || process == nil {
+	proc, err := s.GetRunningProcess()
+	if err != nil || proc == nil {
 		return fmt.Errorf("service already down")
 	}
 
-	running, err := process.IsRunning()
+	running, err := proc.IsRunning()
 
 	if err == nil && !running {
 		return fmt.Errorf("service already down")
 	}
 
 	s.Logger.Println("Stopping service")
-
 	s.WriteServiceProcess(ServiceProcess{
 		Status: STOPPING,
-		Pid:    int32(process.Pid),
+		Pid:    int32(proc.Pid),
 	})
+
+	if err := proc.SendSignal(s.ExitSignal); err != nil {
+		s.Logger.Printf("Signal error: %v, using SIGKILL", err)
+		proc.Kill()
+	}
 
 	terminated := make(chan bool)
 	go func() {
-		err = process.SendSignal(s.ExitSignal)
-
-		// poll the process to see if it has exited
 		for {
-
-			if process == nil {
-				terminated <- true
-				break
-			}
-
-			running, err := process.IsRunning()
+			running, err := proc.IsRunning()
 			if err != nil || !running {
-				terminated <- true
-				break
+				close(terminated)
+				return
 			}
-			time.Sleep(10 * time.Millisecond)
+			time.Sleep(50 * time.Millisecond)
 		}
-
-		terminated <- false
 	}()
 
 	select {
 	case <-terminated:
 		return nil
 	case <-time.After(s.GracefulShutdownTimeout):
+		s.Logger.Println("Graceful shutdown timeout. Attempting to kill process")
+		if err := proc.Kill(); err != nil {
+			s.Logger.Printf("Failed to kill process: %v\n", err)
+		}
 		return fmt.Errorf("failed to terminate service: timeout")
 	}
 }

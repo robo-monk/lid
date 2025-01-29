@@ -1,6 +1,7 @@
 package lid
 
 import (
+	"bufio"
 	"fmt"
 	"io"
 	"log"
@@ -235,12 +236,49 @@ func (lid *Lid) List() {
 	t.Render()
 }
 
+// func (lid *Lid) Logs(services []string) {
+// 	log.Printf("Tailing file %s\n", lid.logsFilename)
+// 	cmd := exec.Command("tail", "-n", "20", "-f", lid.logsFilename)
+// 	cmd.Stdout = os.Stdout
+// 	cmd.Stderr = os.Stderr
+// 	cmd.Run()
+// }
+
 func (lid *Lid) Logs(services []string) {
-	log.Printf("Tailing file %s\n", lid.logsFilename)
-	cmd := exec.Command("tail", "-n", "20", "-f", lid.logsFilename)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	cmd.Run()
+	file, err := os.Open(lid.logsFilename)
+	if err != nil {
+		lid.logger.Printf("Failed to open logs: %v", err)
+		return
+	}
+	defer file.Close()
+
+	// Seek to end and follow
+	file.Seek(0, io.SeekEnd)
+	reader := bufio.NewReader(file)
+
+	for {
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			if err != io.EOF {
+				lid.logger.Printf("Read error: %v", err)
+				return
+			}
+			time.Sleep(500 * time.Millisecond)
+			continue
+		}
+
+		// Filter by service if specified
+		if len(services) > 0 {
+			for _, service := range services {
+				if strings.Contains(line, fmt.Sprintf("[%s]", service)) {
+					fmt.Print(line)
+					break
+				}
+			}
+		} else {
+			fmt.Print(line)
+		}
+	}
 }
 
 func (lid *Lid) GetUsage() string {
