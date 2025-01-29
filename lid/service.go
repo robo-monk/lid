@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"syscall"
 	"time"
 
 	"github.com/shirou/gopsutil/v4/process"
@@ -399,7 +400,7 @@ func (s *Service) Stop() error {
 
 	terminated := make(chan bool)
 	go func() {
-		err = process.Terminate()
+		err = process.SendSignal(syscall.SIGINT)
 
 		if err != nil {
 			terminated <- false
