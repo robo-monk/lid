@@ -19,9 +19,11 @@ import (
 
 const NO_PID int32 = 0
 
-const READINESS_CHECK_PASSED_MESSAGE = "Readiness check passed"
-const READINESS_CHECK_FAILED_MESSAGE = "Readiness check failed"
-const NO_READINESS_CHECK_MESSAGE = "No readiness check, assuming success"
+const (
+	READINESS_CHECK_PASSED_MESSAGE = "Readiness check passed"
+	READINESS_CHECK_FAILED_MESSAGE = "Readiness check failed"
+	NO_READINESS_CHECK_MESSAGE     = "No readiness check, assuming success"
+)
 
 type ServiceStatus int8
 
@@ -102,7 +104,8 @@ type Service struct {
 	OnAfterStart         func(self *Service)
 	OnExit               func(e *exec.ExitError, self *Service)
 
-	ExitSignal syscall.Signal
+	ExitSignal  syscall.Signal
+	ExitCommand []string
 }
 
 // ServiceConfig defines how a service should be run and managed.
@@ -137,8 +140,12 @@ type ServiceConfig struct {
 	OnAfterStart         func(self *Service)                    // Called right after service starts
 	OnExit               func(e *exec.ExitError, self *Service) // Called when service exits
 
-	// What signal to send when stopping the service (defaults to SIGTERM)
+	// What signal to send when stopping the service (defaults to SIGTERM).
+	// If ExitCommand is provided, it will be used instead.
 	ExitSignal syscall.Signal
+
+	// Command to run to exit the service. Defaults to nil. (sends ExitSignal)
+	ExitCommand []string
 }
 
 func NewService(name string, config ServiceConfig) *Service {
@@ -187,6 +194,7 @@ func NewService(name string, config ServiceConfig) *Service {
 		Stderr:                  config.Stderr,
 		Logger:                  config.Logger,
 		ExitSignal:              config.ExitSignal,
+		ExitCommand:             config.ExitCommand,
 	}
 
 	return service
@@ -252,13 +260,8 @@ func (s *Service) GetPid() int32 {
 	return s.getCachedProcessState().Pid
 }
 
-func (s *Service) PrepareCommand() (*exec.Cmd, error) {
-
-	if s.IsRunning() {
-		return nil, ErrProcessAlreadyRunning
-	}
-
-	cmd := exec.Command(s.Command[0], s.Command[1:]...)
+func (s *Service) prepareCommand(command []string) (*exec.Cmd, error) {
+	cmd := exec.Command(command[0], command[1:]...)
 
 	if s.Cwd != "" {
 		cmd.Dir, _ = getRelativePath(s.Cwd)
@@ -276,14 +279,25 @@ func (s *Service) PrepareCommand() (*exec.Cmd, error) {
 		cmd.Env = append(cmd.Env, userDefinedEnv...)
 	}
 
-	// cmd.Env = append(cmd.Env, s.Env...)
+	return cmd, nil
+}
+
+func (s *Service) PrepareStartCommand() (*exec.Cmd, error) {
+
+	if s.IsRunning() {
+		return nil, ErrProcessAlreadyRunning
+	}
+
+	cmd, err := s.prepareCommand(s.Command)
+	if err != nil {
+		return nil, err
+	}
 
 	s.Logger.Println("Starting")
 
 	return cmd, nil
 }
 
-// func (s *Service) handleReadinessCheck(reader io.ReadCloser, pid int32) error {
 func (s *Service) handleReadinessCheck(reader io.Reader, pid int32) error {
 	readinessDone := make(chan bool)
 
@@ -341,7 +355,7 @@ func (s *Service) handleReadinessCheck(reader io.Reader, pid int32) error {
 }
 
 func (s *Service) Start() error {
-	cmd, err := s.PrepareCommand()
+	cmd, err := s.PrepareStartCommand()
 	if err != nil {
 		s.Logger.Printf("%v\n", err)
 		return err
@@ -449,17 +463,34 @@ func (s *Service) Stop() error {
 		Pid:    int32(proc.Pid),
 	})
 
-	if err := proc.SendSignal(s.ExitSignal); err != nil {
+	if s.ExitCommand != nil {
+		s.Logger.Printf("Running exit command: %v\n", s.ExitCommand)
+
+		cmd, err := s.prepareCommand(s.ExitCommand)
+
+		cmd.Stdout = s.Logger.Writer()
+		cmd.Stderr = s.Logger.Writer()
+
+		if err != nil {
+			s.Logger.Printf("Failed to run exit command: %v\n", err)
+		}
+
+		err = cmd.Run()
+		if err != nil {
+			s.Logger.Printf("Failed to run exit command: %v\n", err)
+		}
+	} else if err := proc.SendSignal(s.ExitSignal); err != nil {
 		s.Logger.Printf("Signal error: %v, using SIGKILL", err)
 		proc.Kill()
 	}
 
 	terminated := make(chan bool)
 	go func() {
+		defer close(terminated)
+
 		for {
 			running, err := proc.IsRunning()
 			if err != nil || !running {
-				close(terminated)
 				return
 			}
 			time.Sleep(50 * time.Millisecond)

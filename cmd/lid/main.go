@@ -4,6 +4,7 @@ import (
 	"os/exec"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/robo-monk/lid/lid"
 )
@@ -49,14 +50,24 @@ func main() {
 		},
 	})
 
-	manager.Register("b", lid.ServiceConfig{
-		Cwd:     "../../../convex/convex/convex-insights/scrape-server",
-		EnvFile: ".env",
-		Command: []string{"bun", "run", "./src/index.ts"},
-		OnExit: func(e *exec.ExitError, service *lid.Service) {
-			service.Logger.Println("scraper failed...")
+	manager.Register("docker", lid.ServiceConfig{
+		Cwd:                   "../../../convex/convex/convex-insights/scrape-server",
+		Command:               []string{"docker", "compose", "up"},
+		ExitCommand:           []string{"docker", "compose", "down"},
+		ReadinessCheckTimeout: 10 * time.Second,
+		StdoutReadinessCheck: func(line string) bool {
+			return strings.Contains(line, "WARP status: Connected")
 		},
 	})
+
+	// manager.Register("b", lid.ServiceConfig{
+	// 	Cwd:     "../../../convex/convex/convex-insights/scrape-server",
+	// 	EnvFile: ".env",
+	// 	Command: []string{"bun", "run", "./src/index.ts"},
+	// 	OnExit: func(e *exec.ExitError, service *lid.Service) {
+	// 		service.Logger.Println("scraper failed...")
+	// 	},
+	// })
 
 	manager.Run()
 }

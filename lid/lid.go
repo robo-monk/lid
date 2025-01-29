@@ -47,6 +47,7 @@ func New() *Lid {
 	lid, err := NewWithOptions(LidOptions{
 		LogsFilename: logsFilename,
 	})
+
 	if err != nil {
 		log.Fatalln(err)
 	}
@@ -114,7 +115,10 @@ func (lid *Lid) ForkSpawn(serviceName string) {
 	timeout := time.After(service.ReadinessCheckTimeout)
 
 	go tailFile(tempFile.Name(), func(line string) bool {
-		fmt.Print("\t", line)
+		// fmt.Print("\t", line)
+
+		service.Logger.Printf("%s", line)
+
 		if strings.Contains(line, READINESS_CHECK_PASSED_MESSAGE) || strings.Contains(line, NO_READINESS_CHECK_MESSAGE) {
 			readyChan <- true
 			return true
@@ -229,7 +233,7 @@ func (lid *Lid) List() {
 			fmt.Sprintf("%ds", upTime/1000),
 			fmt.Sprintf("%d", pid),
 			fmt.Sprintf("%f%%", cpu),
-			fmt.Sprintf("%dMB", mem.RSS/1000000),
+			fmt.Sprintf("%.2fMB", float64(mem.RSS)/1024/1024),
 		)
 	}
 
@@ -327,9 +331,7 @@ func (lid *Lid) Run() {
 	case "restart":
 		lid.Stop(os.Args[2:])
 		lid.Start(os.Args[2:])
-	case "ls":
-		fallthrough
-	case "list":
+	case "list", "ls":
 		lid.List()
 	case "logs":
 		lid.Logs(os.Args[2:])

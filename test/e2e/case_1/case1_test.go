@@ -169,5 +169,4 @@ func TestCase1(t *testing.T) {
 	time.Sleep(500 * time.Millisecond)
 	RequireProcessStatus(t, "worker", "Stopped")
 	RequireProcessStatus(t, "unstable-service", "Stopped")
-	return
 }
