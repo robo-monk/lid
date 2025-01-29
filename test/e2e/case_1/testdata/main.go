@@ -26,7 +26,7 @@ func main() {
 	// Background worker that processes jobs
 	manager.Register("worker", lid.ServiceConfig{
 		Cwd:                   "../../mock_services",
-		Command:               []string{ "bash", "slow_start.sh", strconv.Itoa(START_MS), strconv.Itoa(LOOP_MS) },
+		Command:               []string{"bash", "slow_start.sh", strconv.Itoa(START_MS), strconv.Itoa(LOOP_MS)},
 		ReadinessCheckTimeout: 1 * time.Second,
 		StdoutReadinessCheck: func(line string) bool {
 			return strings.Contains(line, "Started")

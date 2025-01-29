@@ -79,6 +79,8 @@ type Service struct {
 	OnBeforeStart        func(self *Service) error
 	OnAfterStart         func(self *Service)
 	OnExit               func(e *exec.ExitError, self *Service)
+
+	ExitSignal syscall.Signal
 }
 
 type ServiceConfig struct {
@@ -97,6 +99,8 @@ type ServiceConfig struct {
 	OnBeforeStart        func(self *Service) error
 	OnAfterStart         func(self *Service)
 	OnExit               func(e *exec.ExitError, self *Service)
+
+	ExitSignal syscall.Signal
 }
 
 func NewService(name string, config ServiceConfig) *Service {
@@ -105,11 +109,11 @@ func NewService(name string, config ServiceConfig) *Service {
 	}
 
 	if config.GracefulShutdownTimeout == 0 {
-		config.GracefulShutdownTimeout = 1 * time.Second
+		config.GracefulShutdownTimeout = 5 * time.Second
 	}
 
 	if config.ReadinessCheckTimeout == 0 {
-		config.ReadinessCheckTimeout = 1 * time.Second
+		config.ReadinessCheckTimeout = 5 * time.Second
 	}
 
 	if config.Stdout == nil {
@@ -118,6 +122,10 @@ func NewService(name string, config ServiceConfig) *Service {
 
 	if config.Stderr == nil {
 		config.Stderr = config.Logger.Writer()
+	}
+
+	if config.ExitSignal == 0 {
+		config.ExitSignal = syscall.SIGTERM
 	}
 
 	service := &Service{
@@ -134,6 +142,7 @@ func NewService(name string, config ServiceConfig) *Service {
 		Stdout:                  config.Stdout,
 		Stderr:                  config.Stderr,
 		Logger:                  config.Logger,
+		ExitSignal:              config.ExitSignal,
 	}
 
 	// p, err := service.GetRunningProcess()
@@ -173,7 +182,6 @@ func (s *Service) getCachedProcessState() ServiceProcess {
 }
 
 func (s *Service) WriteServiceProcess(sp ServiceProcess) error {
-	s.Logger.Printf("Writing cache: %v\n", sp)
 	return sp.WriteToFile(s.GetServiceProcessFilename())
 }
 
@@ -359,14 +367,23 @@ func (s *Service) handleProcessExit(err error) {
 	}
 
 	if s.getCachedProcessState().Status != STOPPED {
-		s.Logger.Printf("Exited: %v\n", err.(*exec.ExitError))
+		if err != nil {
+			s.Logger.Printf("Exited: %v\n", err)
+		} else {
+			s.Logger.Println("Exited with no error")
+		}
+
 		s.WriteServiceProcess(ServiceProcess{
 			Status: EXITED,
 			Pid:    NO_PID,
 		})
 
 		if s.OnExit != nil {
-			s.OnExit(err.(*exec.ExitError), s)
+			if err != nil {
+				s.OnExit(err.(*exec.ExitError), s)
+			} else {
+				s.OnExit(&exec.ExitError{}, s)
+			}
 		}
 	} else {
 		s.Logger.Println("Stopped")
@@ -400,13 +417,19 @@ func (s *Service) Stop() error {
 
 	terminated := make(chan bool)
 	go func() {
-		err = process.SendSignal(syscall.SIGINT)
+		err = process.SendSignal(s.ExitSignal)
 
-		if err != nil {
-			terminated <- false
-		} else {
-			terminated <- true
+		// poll the process to see if it has exited
+		for {
+			running, err := process.IsRunning()
+			if err != nil || !running {
+				terminated <- true
+				break
+			}
+			time.Sleep(10 * time.Millisecond)
 		}
+
+		terminated <- false
 	}()
 
 	select {

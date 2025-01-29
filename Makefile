@@ -12,6 +12,7 @@ build:
 .PHONY: lint test
 
 test:
+	go clean -testcache
 	go test -v ./...
 
 lint:

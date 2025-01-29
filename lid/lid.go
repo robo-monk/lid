@@ -152,12 +152,6 @@ func (lid *Lid) Start(services []string) {
 				service.Logger.Printf("Running with PID %d\n", proc.Pid)
 			} else {
 				lid.ForkSpawn(service.Name)
-				// _, err := service.PrepareCommand()
-				// if err != nil {
-				// 	log.Printf("%s: %v\n", service.Name, err)
-				// } else {
-				// 	lid.ForkSpawn(service.Name)
-				// }
 			}
 		}()
 	}
@@ -166,6 +160,9 @@ func (lid *Lid) Start(services []string) {
 }
 
 func (lid *Lid) Stop(services []string) {
+	lid.logger.Println("Stopping services")
+	var wg sync.WaitGroup
+
 	for _, service := range lid.services {
 		if len(services) > 0 {
 			if !contains(services, service.Name) {
@@ -173,13 +170,20 @@ func (lid *Lid) Stop(services []string) {
 			}
 		}
 
-		err := service.Stop()
-		if err != nil {
-			service.Logger.Printf("%s: %v\n", service.Name, err)
-		} else {
-			service.Logger.Printf("%s: Stopped\n", service.Name)
-		}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			err := service.Stop()
+			if err != nil {
+				service.Logger.Printf("%s: %v\n", service.Name, err)
+			} else {
+				service.Logger.Printf("%s: Stopped\n", service.Name)
+			}
+		}()
 	}
+
+	wg.Wait()
+	lid.logger.Println("Services stopped")
 }
 
 func (lid *Lid) List() {

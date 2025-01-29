@@ -3,6 +3,7 @@ package main
 import (
 	"os/exec"
 	"strings"
+	"syscall"
 
 	"github.com/robo-monk/lid/lid"
 )
@@ -21,6 +22,20 @@ func main() {
 			service.Logger.Println("POCKETBASE FAILED")
 			service.Start()
 		},
+	})
+
+	// simulate a container with slow startup and a slow shutdown
+	manager.Register("container", lid.ServiceConfig{
+		// trap SIGINT and exit gracefully after 3 seconds
+		// print hello after 3 seconds
+		Command: []string{"bash", "-c", "trap 'sleep 3; exit 0' SIGINT; sleep 3; echo 'hello'; while true; do sleep 1; done"},
+		StdoutReadinessCheck: func(line string) bool {
+			return strings.Contains(line, "hello")
+		},
+		OnAfterStart: func(service *lid.Service) {
+			service.Logger.Println("Container started")
+		},
+		ExitSignal: syscall.SIGINT,
 	})
 
 	manager.Register("test-recur", lid.ServiceConfig{
