@@ -399,9 +399,10 @@ func (s *Service) Stop() error {
 	}()
 
 	process, err := s.GetRunningProcess()
-	if err != nil {
+	if err != nil || process == nil {
 		return fmt.Errorf("service already down")
 	}
+
 	running, err := process.IsRunning()
 
 	if err == nil && !running {
@@ -421,6 +422,12 @@ func (s *Service) Stop() error {
 
 		// poll the process to see if it has exited
 		for {
+
+			if process == nil {
+				terminated <- true
+				break
+			}
+
 			running, err := process.IsRunning()
 			if err != nil || !running {
 				terminated <- true
